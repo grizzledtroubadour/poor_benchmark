@@ -1,0 +1,30 @@
+data/
+!*/src/data/
+logs/
+tests/
+model_cache/
+model_zoom/
+checkpoints/
+
+outputs/
+wandb/
+results/
+.hydra/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+*.pyc
+.pytest_cache/
+
+# environment
+.vscode/
+venv/
+
+# OS
+.DS_Store
+
+# npu
+kernel_meta/

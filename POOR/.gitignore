@@ -1,0 +1,25 @@
+data/
+pdbs/
+splits/
+figures/
+
+output/
+outputs/
+logs/
+tests/
+check/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+*.pyc
+.pytest_cache/
+
+# environment
+.vscode/
+venv/
+
+# OS
+.DS_Store
