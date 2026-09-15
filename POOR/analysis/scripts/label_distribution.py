@@ -1,7 +1,11 @@
 """Label long-tail distribution stats for benchmark_analysis.md §4 (csv-only).
 
 Classification tasks (EC / GO-BP / GO-CC / GO-MF / fold / SSP):
-  - n_labels: unique label combinations in TRAIN split (per-residue SSP: unique tokens)
+  - primary stats: individual-label frequency in TRAIN split
+    (multi-label EC/GO labels are ';'-separated; per-residue SSP: unique tokens).
+    n_labels here matches the class counts in paper Table 1.
+  - secondary stats ("combo_*"): unique label *combinations* (whole label string
+    as one unit), kept for reference.
   - head20/tail50 coverage: top-20% / bottom-50% of labels' share of label occurrences
   - singleton ratio: labels occurring exactly once (train)
   - Zipf coefficient: slope of log(freq) ~ log(rank) fit
@@ -38,16 +42,10 @@ REG_TASKS = OrderedDict([
 def tokenize(v, task):
     if task == "SSP":
         return [t.strip("[]") for t in v.split()]
-    return [v]  # label combination as one unit (matches previous methodology)
+    return v.split(";")  # individual labels; single-label tasks yield one token
 
 
-def long_tail(path, task):
-    df = pd.read_csv(os.path.join(ROOT, path), dtype=str, keep_default_na=False)
-    cnt = Counter()
-    for v in df["label"]:
-        for t in tokenize(v, task):
-            if t and t != "-1":
-                cnt[t] += 1
+def _stats(cnt):
     freqs = np.array(sorted(cnt.values(), reverse=True), dtype=float)
     total = freqs.sum()
     n = len(freqs)
@@ -65,6 +63,22 @@ def long_tail(path, task):
         ("singleton_ratio", round(singletons, 4)),
         ("zipf_slope", round(float(slope), 3)),
     ])
+
+
+def long_tail(path, task):
+    df = pd.read_csv(os.path.join(ROOT, path), dtype=str, keep_default_na=False)
+    cnt = Counter()
+    for v in df["label"]:
+        for t in tokenize(v, task):
+            if t and t != "-1":
+                cnt[t] += 1
+    out = _stats(cnt)
+    if task != "SSP":
+        # secondary: whole label combination as one unit (previous methodology)
+        combo_cnt = Counter(v for v in df["label"] if v)
+        for k, v in _stats(combo_cnt).items():
+            out["combo_" + k] = v
+    return out
 
 
 def main():
