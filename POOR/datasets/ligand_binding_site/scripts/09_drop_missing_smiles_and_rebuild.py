@@ -9,11 +9,11 @@ over from the existing test split.
 Use --recompute_full_ood only when you explicitly want to regenerate all OOD
 columns from scratch (will take a long time).
 
-NOTE (2026-08 统一整理): 列名已适配统一 schema（labels->label, pdb_file->struct_file,
-file_type 列取消；ExtremeShort/ExtremeLong -> OOD_ExtremeShort/OOD_ExtremeLong）。
-has_ec_annotation / OOD_NewFunction / OOD_NewFold_* / is_time_cutoff 等为历史列名，
-现已被 OOD_NewEC_* / TM-score_* 等统一口径取代（由对应 skill 脚本落盘，
-见 DATA_PROCESS.md 阶段四）。
+NOTE (consolidated 2026-08): columns use the unified schema (labels->label, pdb_file->struct_file;
+file_type removed; ExtremeShort/ExtremeLong -> OOD_ExtremeShort/OOD_ExtremeLong).
+has_ec_annotation / OOD_NewFunction / OOD_NewFold_* / is_time_cutoff are legacy names,
+replaced by OOD_NewEC_* / TM-score_* through canonical skill scripts;
+see DATA_PROCESS.md Stage 4.
 """
 import argparse
 import ast
@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 TASK_DIR = Path(__file__).resolve().parent.parent  # datasets/ligand_binding_site
-ROOT = TASK_DIR.parent.parent                      # 项目根（POOR/）
+ROOT = TASK_DIR.parent.parent                      # Project root (POOR/)
 DATASET_DIR = TASK_DIR / "splits"
 OOD_SCRIPT = TASK_DIR / "scripts" / "11_build_ood_splits.py"
 SIFTS_EC_FILE = ROOT / "data" / "sifts" / "sifts_chain_ec.tsv.gz"

@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""为 func_prediction 的 go_mf / go_bp / go_cc 测试集添加 EC 功能 OOD 六列。
+"""Add six EC function OOD columns to func_prediction go_mf / go_bp / go_cc test sets.
 
-背景：GO 版 OOD（NewGO/LongTailGO）经分析不可行（标签词表封闭 → NewGO 恒 0；
-全量 GO 注释 all-not-in 也恒 0）。按用户决定，改为将统一的 EC 功能 OOD 口径
-（NewEC / LongTailEC）扩展到 go_* 三个测试集。
+Background: GO OOD (NewGO/LongTailGO) is not viable: the closed label vocabulary makes NewGO always zero;
+all-not-in over full GO annotations is also always zero. The selected alternative extends unified EC OOD
+(NewEC / LongTailEC) to the three go_* test sets.
 
-口径（与 add_unified_newec.py / add_unified_longtail_ec.py 完全一致）：
-- EC 来源：SIFTS 链级 EC（data/sifts/sifts_chain_ec.tsv.gz），
-  uid 映射 (u[:4].lower(), u[5:])，与 func_ec 相同
-- levels()：段数>=3 → L3=前三段；段数==4 → L4（允许部分 "-"）
-- OOD_NewEC_L3/L4：参考 train+val，有 EC 且所有 EC（对应层级）∉ 参考集 → True
-  （all-not-in）；无 EC → False
-- OOD_LongTail_EC_{L3,L4}_le{5,10}：参考 train only（逐样本频次，含 0），
-  有 EC 且所有 EC（对应层级）train 频次 < 阈值 → True（all-not-in）；无 EC → False
-- Default=False 行（极端长度预挑出样本）：六列均为 NaN（未计算，区别于 False）
-- 六列追加到 csv 末尾
+Definition (identical to add_unified_newec.py / add_unified_longtail_ec.py):
+- EC source: SIFTS chain-level EC（data/sifts/sifts_chain_ec.tsv.gz），
+  uid mapping (u[:4].lower(), u[5:])，as in func_ec
+- levels()：at least three components -> L3=first three; four components -> L4 (partial "-" allowed)
+- OOD_NewEC_L3/L4：reference train+val: annotated and all ECs at the given level absent from reference -> True
+  (all-not-in); no EC -> False
+- OOD_LongTail_EC_{L3,L4}_le{5,10}：reference training-only per-sample frequencies, including zero;
+  annotated and all EC training frequencies at the given level < threshold -> True (all-not-in); no EC -> False
+- Default=False rows (preselected extreme-length samples): all six columns are NaN (not computed, distinct from False)
+- Append six columns to the CSV.
 
-用法：python3 .skills/ec-function-ood-annotation/scripts/add_go_ec_ood.py
+Usage: python3 .skills/ec-function-ood-annotation/scripts/add_go_ec_ood.py
 """
 import gzip
 import json
@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pandas as pd
 
-# 仓库根：.skills/ec-function-ood-annotation/scripts/ 上溯 3 级
+# Repository root: three levels above .skills/ec-function-ood-annotation/scripts/.
 POOR = Path(__file__).resolve().parents[3]
 SIFTS_EC_TSV = POOR / "data" / "sifts" / "sifts_chain_ec.tsv.gz"
 FUNC = POOR / "datasets" / "func_prediction"
@@ -65,7 +65,7 @@ def main():
         val_ids = pd.read_csv(FUNC / "splits" / f"{task}_val.csv",
                               usecols=["unique_id"])["unique_id"]
 
-        # 参考集：NewEC 用 train+val；LongTailEC 用 train-only 逐样本频次
+        # References: train+val for NewEC; training-only per-sample frequencies for LongTailEC.
         tv3, tv4 = set(), set()
         f3, f4 = Counter(), Counter()
         for u in train_ids:

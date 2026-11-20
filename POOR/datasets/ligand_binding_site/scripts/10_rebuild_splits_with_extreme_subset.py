@@ -8,11 +8,11 @@
 All extreme-length rows from train/val/test are moved to test.
 Other OOD annotations are recomputed only on Default test proteins.
 
-NOTE (2026-08 统一整理): 列名已适配统一 schema（labels->label, pdb_file->struct_file,
-file_type 列取消）；protein_length 缺失时由 aa_seq 派生；修复了原脚本中未定义的
-ROOT 路径（缓存清理/备份均指向本任务 output/）。输出的 ExtremeShort/ExtremeLong、
-OOD_NewFold_*、is_time_cutoff 等为历史列名，现已被 OOD_ExtremeShort/OOD_ExtremeLong、
-TM-score_* 等统一口径取代（见 DATA_PROCESS.md 阶段四）。
+NOTE (consolidated 2026-08): unified columns (labels->label, pdb_file->struct_file,
+file_type removed); derive missing protein_length from aa_seq. The previously undefined
+ROOT path is fixed (cache cleanup/backups target this task output/). Legacy outputs
+ExtremeShort/ExtremeLong, OOD_NewFold_*, and is_time_cutoff were replaced with
+OOD_ExtremeShort/OOD_ExtremeLong, TM-score_*, etc. (DATA_PROCESS.md Stage 4).
 """
 import argparse
 import logging
@@ -124,9 +124,9 @@ def main():
     test_default["ExtremeShort"] = False
     test_default["ExtremeLong"] = False
 
-    # Prepare extreme rows: Default=False；其余 OOD 列与 idr_ratio 直接置 NaN
-    # （"未计算"语义，全项目统一惯例，流水线位置写入；
-    #   finalize_ood_columns.py --mode nan 仅作兜底校验）
+    # Extreme rows: Default=False; other OOD columns and idr_ratio receive NaN.
+    # NaN means not computed; write it here following project-wide convention.
+    # finalize_ood_columns.py --mode nan is only a fallback check.
     extreme_all["Default"] = False
     extreme_all["ExtremeShort"] = extreme_all["protein_length"] < 60
     extreme_all["ExtremeLong"] = extreme_all["protein_length"] > 1000
@@ -139,7 +139,7 @@ def main():
     # Combine test
     test_final = pd.concat([test_default, extreme_all], ignore_index=True)
 
-    # Ensure boolean dtype for OOD columns (except idr_ratio)；extreme 行保留 NaN
+    # Ensure boolean OOD columns except idr_ratio; retain NaN on extreme rows.
     dmask = test_final["Default"].astype(bool)
     bool_ood_cols = [c for c in ood_cols if c != "idr_ratio"] + ["Default", "ExtremeShort", "ExtremeLong"]
     for c in bool_ood_cols:

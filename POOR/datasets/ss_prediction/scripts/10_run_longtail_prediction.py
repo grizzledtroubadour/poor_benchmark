@@ -83,8 +83,8 @@ def main():
     )
     test_df["OOD_LongTail"] = test_df["OOD_LongTail"].fillna(False).astype(bool)
 
-    # Default=False（极端长度）行直接置 NaN（"未计算"语义，全项目统一惯例，
-    # 流水线位置写入；finalize_ood_columns.py --mode nan 仅作兜底校验）
+    # Write NaN for Default=False extreme-length rows (not computed, project convention).
+    # Apply here in the pipeline; finalize_ood_columns.py --mode nan only validates.
     if "Default" in test_df.columns:
         nd = ~test_df["Default"].astype(bool)
         if nd.any():

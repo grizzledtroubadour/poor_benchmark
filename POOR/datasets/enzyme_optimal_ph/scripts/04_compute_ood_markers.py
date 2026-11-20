@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-为 optimal_ph_prediction_test.csv 计算 OOD 标记
+Compute OOD flags for optimal_ph_prediction_test.csv.
 - seq_Redundancy_90 ~ seq_Redundancy_30（MMseqs2 easy-search）
 - TM-score_0.9 ~ TM-score_0.3（Foldseek easy-search）
-- OOD_Orphan（MMseqs2 easy-search，无显著 hit）
-- OOD_IDR（metapredict v3 批量预测，IDR_ratio > 0.1，仅 Default 样本；
-  本任务历史口径为 0.1，与其他任务的 0.3 不同，口径对照见
-  .skills/ood-annotation-toolkit/SKILL.md 的 idr_ood.py 口径表；
-  该逻辑已并入本脚本，原独立重算脚本 compute_ood_idr.py 已归档）
+- OOD_Orphan: no significant MMseqs2 easy-search hit.
+- OOD_IDR: metapredict v3 batch predictions, IDR_ratio >0.1, Default samples only.
+  The historical threshold for this task is 0.1, unlike 0.3 for other tasks; see
+  the idr_ood.py definitions table in .skills/ood-annotation-toolkit/SKILL.md.
+  This logic incorporates the archived standalone compute_ood_idr.py implementation.
 
-Default=False（极端长度）行的上述全部 OOD 列在保存前直接置 NaN
-（全项目统一惯例：NaN 表示"未计算"，与 False 区分；仅 OOD_ExtremeShort /
-OOD_ExtremeLong 原因列保留取值）。finalize_ood_columns.py --mode nan 仅作
-兜底校验，不再承担 NaN 化职责。
+Set all these OOD columns to NaN for Default=False extreme-length rows before saving.
+NaN means not computed, unlike False; retain only the OOD_ExtremeShort /
+OOD_ExtremeLong reason flags. finalize_ood_columns.py --mode nan is only a
+fallback check, no longer responsible for NaN conversion.
 """
 import os
 import re
@@ -51,7 +51,7 @@ def write_fasta(df, fasta_path):
 
 
 def run_mmseqs_search(query_fasta, target_fasta, output_tsv, tmp_dir, sensitivity=7):
-    """运行 MMseqs2 easy-search，返回结果 tsv"""
+    """Run MMseqs2 easy-search and return the result TSV."""
     tmp_dir = Path(tmp_dir)
     tmp_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -65,7 +65,7 @@ def run_mmseqs_search(query_fasta, target_fasta, output_tsv, tmp_dir, sensitivit
 
 
 def run_foldseek_search(query_dir, target_dir, output_tsv, tmp_dir):
-    """运行 Foldseek easy-search，返回结果 tsv"""
+    """Run Foldseek easy-search and return the result TSV."""
     tmp_dir = Path(tmp_dir)
     tmp_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -78,7 +78,7 @@ def run_foldseek_search(query_dir, target_dir, output_tsv, tmp_dir):
 
 
 def parse_mmseqs_max_identity(tsv_path, test_ids):
-    """解析 MMseqs2 结果，返回每个 query 的最大 pident"""
+    """Parse MMseqs2 results and return maximum pident per query."""
     max_identity = {uid: 0.0 for uid in test_ids}
     if not Path(tsv_path).exists():
         return max_identity
@@ -94,7 +94,7 @@ def parse_mmseqs_max_identity(tsv_path, test_ids):
 
 
 def parse_foldseek_max_tmscore(tsv_path, test_ids):
-    """解析 Foldseek 结果，返回每个 query 的最大 alntmscore"""
+    """Parse Foldseek results and return maximum alntmscore per query."""
     max_tmscore = {uid: 0.0 for uid in test_ids}
     if not Path(tsv_path).exists():
         return max_tmscore
@@ -110,7 +110,7 @@ def parse_foldseek_max_tmscore(tsv_path, test_ids):
 
 
 def compute_seq_redundancy(test_df, train_val_fasta, tmp_dir):
-    """计算 seq_Redundancy 标记"""
+    """Compute seq_Redundancy flags."""
     print("[INFO] Computing seq_Redundancy...")
     test_fasta = tmp_dir / "test.fa"
     result_tsv = tmp_dir / "mmseqs_search.tsv"
@@ -121,17 +121,17 @@ def compute_seq_redundancy(test_df, train_val_fasta, tmp_dir):
 
     for thr in SEQ_REDUNDANCY_THRESHOLDS:
         col = f"seq_Redundancy_{thr}"
-        # 2026-08-29 起统一为严格小于（与全项目 < 口径一致；此前 <= 曾使
-        # pident 恰等于阈值的 35 行多标 True，已重算修正）
+        # Since 2026-08-29, use strict less-than consistently with the project;
+        # the former <= flagged 35 threshold-equal rows, which were recomputed.
         test_df[col] = test_df["unique_id"].map(lambda uid: max_identity.get(uid, 0.0) < thr)
 
     return test_df
 
 
 def compute_tm_score(test_df, train_val_dir, tmp_dir):
-    """计算 TM-score 标记"""
+    """Compute TM-score flags."""
     print("[INFO] Computing TM-score...")
-    # 创建临时 query 目录，包含所有 test 结构文件
+    # Create a temporary query directory containing all test structures.
     query_dir = tmp_dir / "test_structures"
     query_dir.mkdir(parents=True, exist_ok=True)
     for uid in test_df["unique_id"]:
@@ -150,16 +150,16 @@ def compute_tm_score(test_df, train_val_dir, tmp_dir):
 
     for thr in TM_SCORE_THRESHOLDS:
         col = f"TM-score_{thr:.1f}".replace(".0", "")
-        # 注意列名格式统一为 TM-score_0.9
+        # Use standardized column names such as TM-score_0.9.
         col = f"TM-score_{thr}"
-        # 2026-08-29 起统一为严格小于（实测无恰好等于阈值的样本，数值不变）
+        # Strict less-than since 2026-08-29; no threshold-equal samples, so values are unchanged.
         test_df[col] = test_df["unique_id"].map(lambda uid: max_tmscore.get(uid, 0.0) < thr)
 
     return test_df
 
 
 def compute_orphan(test_df, train_val_fasta, tmp_dir):
-    """计算 OOD_Orphan：test vs train+val 无显著 hit"""
+    """Compute OOD_Orphan: no significant test-to-train+val hit."""
     print("[INFO] Computing OOD_Orphan...")
     test_fasta = tmp_dir / "test_orphan.fa"
     result_tsv = tmp_dir / "mmseqs_orphan.tsv"
@@ -179,7 +179,7 @@ def compute_orphan(test_df, train_val_fasta, tmp_dir):
 
 
 def compute_idr(test_df, idr_threshold=0.1):
-    """计算 OOD_IDR：metapredict v3 批量预测，仅 Default 样本（非 Default → False）"""
+    """Compute OOD_IDR using metapredict v3 batches for Default samples only; other rows -> False."""
     print("[INFO] Computing OOD_IDR...")
     try:
         from metapredict import predict_disorder_fasta
@@ -188,7 +188,7 @@ def compute_idr(test_df, idr_threshold=0.1):
         test_df["OOD_IDR"] = False
         return test_df
 
-    # 写入 FASTA（保留为 output/ 下的中间产物）
+    # Write FASTA, retained as an intermediate under output/.
     fasta_path = OUTPUT_DIR / "test_sequences_for_idr.fasta"
     print(f"[INFO] Writing FASTA: {fasta_path}")
     with open(fasta_path, "w") as f:
@@ -196,13 +196,13 @@ def compute_idr(test_df, idr_threshold=0.1):
             seq = clean_seq(row["aa_seq"])
             f.write(f">{row['unique_id']}\n{seq}\n")
 
-    # 批量预测
+    # Batch prediction.
     print("[INFO] Computing IDR ratios with metapredict v3 (batch)...")
     disorder_dict = predict_disorder_fasta(str(fasta_path), version="V3")
 
     idr_ratios = {}
     for uid, item in disorder_dict.items():
-        # predict_disorder_fasta 返回 [sequence, scores]
+        # predict_disorder_fasta returns [sequence, scores].
         if isinstance(item, (list, tuple)) and len(item) == 2:
             scores = np.array(item[1])
         else:
@@ -232,11 +232,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix="ood_", dir=str(OUTPUT_DIR)) as tmp:
         tmp_dir = Path(tmp)
 
-        # 1. 准备 train+val FASTA
+        # 1. Prepare train+val FASTA.
         train_val_fasta = tmp_dir / "train_val.fa"
         write_fasta(train_val_df, train_val_fasta)
 
-        # 2. 准备 train+val 结构目录（用于 Foldseek）
+        # 2. Prepare train+val structures for Foldseek.
         train_val_dir = tmp_dir / "train_val_structures"
         train_val_dir.mkdir(parents=True, exist_ok=True)
         for uid in train_val_df["unique_id"]:
@@ -248,19 +248,19 @@ def main():
                 if not dst.exists():
                     os.link(src, dst)
 
-        # 3. 计算 OOD 标记
+        # 3. Compute OOD flags.
         test_df = compute_seq_redundancy(test_df, train_val_fasta, tmp_dir)
         test_df = compute_tm_score(test_df, train_val_dir, tmp_dir)
         test_df = compute_orphan(test_df, train_val_fasta, tmp_dir)
         test_df = compute_idr(test_df)
 
-    # 4. 确保 OOD 列为布尔值
+    # 4. Ensure OOD columns are boolean.
     ood_cols = [c for c in test_df.columns if c.startswith(("seq_Redundancy_", "TM-score_", "OOD_"))]
     for col in ood_cols:
         test_df[col] = test_df[col].astype(bool)
 
-    # 4b. Default=False（极端长度）行：除 OOD_ExtremeShort/OOD_ExtremeLong 外的
-    #     OOD 列直接置 NaN（"未计算"语义，全项目统一惯例，流水线位置写入）
+    # 4b. Default=False extreme-length rows: set all OOD columns except length flags
+    #     to NaN (not computed), following project convention at this pipeline stage.
     nd_mask = ~test_df["Default"]
     keep_cols = {"OOD_ExtremeShort", "OOD_ExtremeLong"}
     nan_cols = [c for c in ood_cols if c not in keep_cols]
@@ -269,11 +269,11 @@ def main():
         test_df.loc[nd_mask, col] = pd.NA
     print(f"[INFO] Default=False rows -> NaN: {int(nd_mask.sum())} rows x {len(nan_cols)} cols")
 
-    # 5. 保存
+    # 5. Save.
     test_df.to_csv(TEST_PATH, index=False)
     print(f"[INFO] Updated {TEST_PATH}")
 
-    # 6. 统计摘要
+    # 6. Summary statistics.
     summary = {
         "n_test": int(len(test_df)),
         "n_default": int(test_df["Default"].sum()),

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-使用 MMseqs2 对 EnzyBase12k 序列进行聚类去冗余
-- 输入：metadata.csv 中的 uniprot_seq_cut
-- 输出：聚类结果与统计摘要
+Cluster and deduplicate EnzyBase12k sequences using MMseqs2.
+- Input: metadata.csv uniprot_seq_cut.
+- Output: clusters and summary statistics.
 """
 import os
 import re
@@ -31,7 +31,7 @@ def write_fasta(df, fasta_path):
     with open(fasta_path, "w") as f:
         for _, row in df.iterrows():
             seq = clean_seq(row["uniprot_seq_cut"])
-            if len(seq) >= 20:  # MMseqs2 要求最小长度
+            if len(seq) >= 20:  # MMseqs2 minimum length.
                 f.write(f">{row['uniprot_id']}\n{seq}\n")
     print(f"[INFO] FASTA written")
 
@@ -44,14 +44,14 @@ def run_mmseqs(fasta_path, cluster_out_dir, min_seq_id=0.95, coverage=0.8, cov_m
     cluster_db_path = cluster_out_dir / "cluDB"
     cluster_tsv = cluster_out_dir / "mmseqs_clust95.tsv"
 
-    # 创建 MMseqs2 数据库
+    # Create the MMseqs2 database.
     print("[INFO] Creating MMseqs2 DB...")
     subprocess.run(
         ["mmseqs", "createdb", str(fasta_path), str(db_path)],
         check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
 
-    # 聚类
+    # Cluster.
     print(f"[INFO] Clustering with min-seq-id={min_seq_id}, coverage={coverage}, cov-mode={cov_mode}...")
     subprocess.run(
         [
@@ -64,7 +64,7 @@ def run_mmseqs(fasta_path, cluster_out_dir, min_seq_id=0.95, coverage=0.8, cov_m
         check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
 
-    # 创建 tsv 输出
+    # Create TSV output.
     print("[INFO] Creating TSV output...")
     subprocess.run(
         ["mmseqs", "createtsv", str(db_path), str(db_path), str(cluster_db_path), str(cluster_tsv)],
@@ -76,7 +76,7 @@ def run_mmseqs(fasta_path, cluster_out_dir, min_seq_id=0.95, coverage=0.8, cov_m
 
 
 def parse_clusters(cluster_tsv):
-    """解析 MMseqs2 tsv 聚类结果：rep -> members"""
+    """Parse MMseqs2 cluster TSV as rep -> members."""
     clusters = {}
     with open(cluster_tsv) as f:
         for line in f:

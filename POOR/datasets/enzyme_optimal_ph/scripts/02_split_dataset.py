@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-EnzyBase12k 数据集划分
-- 将 seq_length < 60 或 > 1000 的样本留出作为 OOD-ExtremeLength 测试集
-- 剩余样本中，所有 structure_source == "PDB" 的作为测试集
-- 剩余 AF 样本按 9:1 随机划分为训练集、验证集
+EnzyBase12k dataset splitting
+- Reserve samples with seq_length <60 or >1000 as OOD-ExtremeLength test samples.
+- Assign all remaining structure_source == "PDB" samples to test.
+- Randomly split the remaining AF samples 9:1 into train and validation.
 """
 import json
 import argparse
@@ -28,7 +28,7 @@ def main(random_seed=42):
     n_total = len(df)
     print(f"[INFO] Total samples: {n_total}")
 
-    # 1. OOD-ExtremeLength：长度 < 60 或 > 1000
+    # 1. OOD-ExtremeLength: length <60 or >1000.
     mask_extreme = (df["seq_length"] < 60) | (df["seq_length"] > 1000)
     df_extreme = df[mask_extreme].copy()
     df_rest = df[~mask_extreme].copy()
@@ -36,7 +36,7 @@ def main(random_seed=42):
     print(f"[INFO] OOD-ExtremeLength samples: {len(df_extreme)} ({len(df_extreme)/n_total*100:.2f}%)")
     print(f"[INFO] Remaining samples: {len(df_rest)} ({len(df_rest)/n_total*100:.2f}%)")
 
-    # 2. 剩余样本中，PDB 作为测试集
+    # 2. Assign remaining PDB samples to test.
     mask_pdb = df_rest["structure_source"] == "PDB"
     df_test = df_rest[mask_pdb].copy()
     df_af = df_rest[~mask_pdb].copy()
@@ -44,7 +44,7 @@ def main(random_seed=42):
     print(f"[INFO] Test (PDB) samples: {len(df_test)} ({len(df_test)/n_total*100:.2f}%)")
     print(f"[INFO] AF samples for train/val split: {len(df_af)} ({len(df_af)/n_total*100:.2f}%)")
 
-    # 3. AF 样本按 9:1 划分为训练集和验证集
+    # 3. Split AF samples 9:1 into train/validation.
     rng = np.random.default_rng(random_seed)
     n_af = len(df_af)
     indices = np.arange(n_af)
@@ -60,8 +60,8 @@ def main(random_seed=42):
     print(f"[INFO] Train samples: {len(df_train)} ({len(df_train)/n_total*100:.2f}%)")
     print(f"[INFO] Val samples: {len(df_val)} ({len(df_val)/n_total*100:.2f}%)")
 
-    # 4. 保存划分结果
-    # 保留核心字段
+    # 4. Save split results.
+    # Retain core fields.
     columns_to_keep = [
         "uniprot_id",
         "ph_optimum",
@@ -85,7 +85,7 @@ def main(random_seed=42):
 
     print(f"[INFO] Splits saved to {SPLITS_DIR}")
 
-    # 5. 生成统计摘要
+    # 5. Generate summary statistics.
     def split_stats(sub_df, name):
         return {
             "split": name,

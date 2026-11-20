@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""用 CATH+TED 统一标注重算 ligand_binding_affinity test 的
+"""Recompute ligand_binding_affinity test holdouts using unified CATH+TED annotations:
 OOD_FoldHoldout / OOD_SuperfamilyHoldout。
 
-流程：
-1. 链清单：11,663 个 PDB ×（SIFTS 两文件 ∪ cath-domain-list.txt 中出现的链）——
-   仅 SIFTS 播种会漏 944 条 CATH 已标注链（含 87 个 test PDB 的 278 链）；
-2. 调用 .skills/cath-ted-domain-annotation/scripts/cath_ted_annotate.py（--offline）；
-3. 链级标签按 PDB 聚合取并集（沿用已归档 16_cath_ec_ood.py 的 PDB 级口径），
-   holdout 判定调用 .skills/cath-ted-domain-annotation/scripts/cath_ted_holdout.py
-   （train-only 参考、any 语义、无注释 -> False，口径以该脚本为唯一实现）；
-4. 就地更新 splits/ligand_binding_affinity_test.csv 的两列（其余列不动）。
+Workflow:
+1. Chain list: 11,663 PDBs × chains in the union of both SIFTS files and cath-domain-list.txt.
+   SIFTS-only seeding misses 944 CATH-annotated chains (278 chains in 87 test PDBs).
+2. Run .skills/cath-ted-domain-annotation/scripts/cath_ted_annotate.py (--offline).
+3. Union chain-level labels by PDB, retaining the archived 16_cath_ec_ood.py aggregation unit.
+   Compute holdouts with .skills/cath-ted-domain-annotation/scripts/cath_ted_holdout.py
+   (training-only reference, any semantics, unannotated -> False; sole canonical implementation).
+4. Update only the two holdout columns in splits/ligand_binding_affinity_test.csv.
 """
 import csv
 import gzip
@@ -90,16 +90,16 @@ with open(PDB_LABELS, "w", newline="") as f:
         tt, ss = pdb_labels[pdb]
         w.writerow([pdb, pdb_split_map[pdb], ";".join(sorted(tt)), ";".join(sorted(ss))])
 
-# holdout 判定统一由 skill 脚本实现（train-only 参考、any 语义、无注释 -> False）
+# Canonical skill holdout implementation: training-only reference, any semantics, unannotated -> False.
 subprocess.run([sys.executable, str(HOLDOUT), "--labels", str(PDB_LABELS),
                 "--split-col", "splits", "--out", str(FLAGGED)],
                check=True)
 
-# ---------- 4. 写回 splits（仅两列，其余列不动） ----------
+# ---------- 4. Write back only the two holdout columns; retain all others. ----------
 flagged = pd.read_csv(FLAGGED, dtype=str, keep_default_na=False).set_index("pdb")
 test = pd.read_csv(TEST_CSV, dtype=str, keep_default_na=False)
 pdb_key = test["unique_id"].str.lower()
-# 链清单中无任何链记录的 test PDB（无注释）按口径 -> False
+# Test PDBs without any listed chains are unannotated and receive False.
 test["OOD_FoldHoldout"] = pdb_key.map(flagged["OOD_FoldHoldout"]).fillna("False")
 test["OOD_SuperfamilyHoldout"] = pdb_key.map(flagged["OOD_SuperfamilyHoldout"]).fillna("False")
 assert test[["OOD_FoldHoldout", "OOD_SuperfamilyHoldout"]].isin(["True", "False"]).all().all()

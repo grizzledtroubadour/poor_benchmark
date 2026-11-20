@@ -1,11 +1,11 @@
 """
 Poor benchmark dataset reader for KPLM training pipeline.
 
-适配 poor_benchmark 数据格式：
-  - CSV 列名 struct_file（仅文件名）而非 pdb_path（完整路径），需通过 pdb_dir 拼接
-  - 结构文件支持 .pdb 和 .cif 两种格式
-  - EC 多标签分类的 label 为分号分隔的 EC 编号字符串（如 "3.2.1.-;3.1.7.-"），
-    需通过 ec_vocab.txt 映射为 multi-hot 向量
+Support for the poor_benchmark data format:
+  - CSVs use struct_file (filename), not pdb_path (full path); resolve it relative to pdb_dir.
+  - Both .pdb and .cif structures are supported.
+  - EC multilabel targets are semicolon-separated EC numbers (e.g. "3.2.1.-;3.1.7.-").
+    Map them to multi-hot vectors using ec_vocab.txt.
 """
 
 import os
@@ -24,22 +24,22 @@ import biotite.structure as bs
 
 
 # ---------------------------------------------------------------------------
-# 结构文件加载
+# Structure loading
 # ---------------------------------------------------------------------------
 
 def _load_structure(pdb_dir, struct_file):
-    """从 pdb_dir 目录加载 .pdb 或 .cif 结构文件，返回 ESMProtein 对象。
+    """Load a .pdb or .cif structure from pdb_dir and return an ESMProtein.
 
-    默认读取全部多肽链：序列按链以 '|'（CHAIN_BREAK_STR）拼接，atom37
-    坐标在链边界插入 NaN 行，与序列逐位对齐（官方多聚体格式）。单链文件
-    行为与此前一致（无 '|'）。全链解析失败时回退到首链读取。
+    Read all polypeptide chains by default. Join sequences with '|' (CHAIN_BREAK_STR),
+    inserting NaN atom37 coordinate rows at chain boundaries to align with the sequence
+    (the official multimer format). Single-chain behavior is unchanged (no '|'). Fall back to the first chain if all-chain parsing fails.
     """
     full_path = os.path.join(pdb_dir, struct_file)
     ext = os.path.splitext(struct_file)[1].lower()
 
     if ext == ".cif":
-        # 优先使用移植自官方 esm 仓库的原生 mmCIF 解析（MmcifWrapper），
-        # 不经过 PDB 格式转换，天然支持多字符 chain_id 和超宽 b_factor 列。
+        # Prefer native mmCIF parsing (MmcifWrapper) ported from the official esm repository.
+        # Avoid PDB conversion to support multicharacter chain IDs and wide b_factor fields.
         from shared.esm.utils.structure.protein_chain import ProteinChain
         from shared.esm.utils.structure.protein_complex import ProteinComplex
         try:
@@ -49,10 +49,10 @@ def _load_structure(pdb_dir, struct_file):
                     ProteinComplex.from_chains(chains))
             return ESMProtein.from_protein_chain(chains[0])
         except Exception:
-            pass  # 无 SEQRES 实体记录的预测结构 cif 等，走 biotite 回退路径
-        # biotite 回退路径：从 ATOM 记录构建序列。chain_id 超 1 字符时
-        # ProteinChain 内部转 PDB 会抛 BadStructureError，故逐链重映射为
-        # 单字符 chain_id；b_factor 超 PDB 3 位整数列上限时截断。
+            pass  # Predicted CIFs without SEQRES entities use the biotite fallback.
+        # biotite fallback: build the sequence from ATOM records. Multicharacter chain IDs
+        # trigger BadStructureError during internal PDB conversion in ProteinChain, so remap
+        # each chain to a single character and clip b_factor values to the PDB field limit.
         from biotite.structure.io.pdbx import CIFFile, get_structure
         cif_file = CIFFile.read(full_path)
         atom_array = get_structure(cif_file, model=1, extra_fields=["b_factor"])
@@ -73,7 +73,7 @@ def _load_structure(pdb_dir, struct_file):
                 ProteinComplex.from_chains(chains))
         return ESMProtein.from_protein_chain(chains[0])
     else:
-        # .pdb 及其他格式：优先全链读取，失败回退首链
+        # .pdb and other formats: try all chains first, then fall back to the first chain.
         try:
             return ESMProtein.from_pdb(full_path, chain_id="all")
         except Exception:
@@ -81,12 +81,12 @@ def _load_structure(pdb_dir, struct_file):
 
 
 def _load_plddt(pdb_dir, struct_file):
-    """读取结构文件全部链 CA 原子的 b_factor（AF2/ESMFold 结构中为 pLDDT）。
+    """Read CA b_factor values across all chains (pLDDT for AF2/ESMFold structures).
 
-    供 SaProt 的 pLDDT 掩码使用（官方建议 AF2 结构中 pLDDT<70 的区域
-    用 '#' 掩码）。多链按链拼接，链边界插入 100.0 占位（与 _load_structure
-    的全链序列逐位等长；100.0 使 pLDDT<70 掩码不会误伤边界位）。
-    读取失败或不含 b_factor 时返回 None。
+    Used for SaProt pLDDT masking (the official recommendation masks AF2 regions
+    with pLDDT <70 using '#'). Concatenate chains with a 100.0 boundary placeholder,
+    matching the all-chain sequence in _load_structure without masking chain boundaries.
+    Return None if reading fails or b_factor is unavailable.
     """
     full_path = os.path.join(pdb_dir, struct_file)
     ext = os.path.splitext(struct_file)[1].lower()
@@ -102,7 +102,7 @@ def _load_plddt(pdb_dir, struct_file):
         arr = arr[arr.atom_name == "CA"]
         if arr.array_length() == 0:
             return None
-        # 按链出现顺序拼接，链边界插入 100.0（与全链序列的 '|' 位对齐）
+        # Concatenate in chain order, inserting 100.0 at each '|' sequence boundary.
         chain_ids = list(dict.fromkeys(arr.chain_id))
         parts = []
         for cid in chain_ids:
@@ -118,11 +118,11 @@ def _load_plddt(pdb_dir, struct_file):
 
 
 # ---------------------------------------------------------------------------
-# ECFP4 指纹解析
+# ECFP4 fingerprint parsing
 # ---------------------------------------------------------------------------
 
 def ecfp4_to_vector(ecfp4_str, n_bits=2048):
-    """把 ECFP4 稀疏 bit 索引列表字符串（如 "[80, 294, 389]"）转成 0/1 向量。"""
+    """Convert a sparse ECFP4 bit-index string (e.g. "[80, 294, 389]") to a binary vector."""
     vec = torch.zeros(n_bits)
     try:
         indices = [int(i) for i in ast.literal_eval(str(ecfp4_str))]
@@ -135,13 +135,13 @@ def ecfp4_to_vector(ecfp4_str, n_bits=2048):
 
 
 # ---------------------------------------------------------------------------
-# 标签词表加载
+# Label vocabulary loading
 # ---------------------------------------------------------------------------
 
 def load_label_vocab(vocab_path):
-    """加载 EC 词表文件，返回 {EC编号字符串: 整数索引} 映射。
+    """Load the EC vocabulary as a mapping from EC number strings to integer indices.
 
-    词表文件格式：每行 ``index\\tEC_number``，例如 ``0\\t1.1.1.-``
+    File format: one ``index\\tEC_number`` per line, e.g. ``0\\t1.1.1.-``.
     """
     vocab = {}
     with open(vocab_path, "r") as f:
@@ -157,21 +157,21 @@ def load_label_vocab(vocab_path):
 
 
 # ---------------------------------------------------------------------------
-# 标签解析（顶层函数，供 read_data_poor 与 PPI embedding bank 复用）
+# Label parsing (top-level function shared by read_data_poor and the PPI embedding bank)
 # ---------------------------------------------------------------------------
 
 def parse_label_poor(label, task_type, num_classes, label_vocab):
-    """解析单条样本的标签，无法解析时返回 None。"""
+    """Parse one sample label; return None if parsing fails."""
     if task_type == "multi_labels_classification":
         if label_vocab is not None:
-            # poor_benchmark: 分号分隔的 EC 编号字符串 → multi-hot
+            # poor_benchmark: semicolon-separated EC numbers -> multi-hot vector.
             ec_labels = str(label).split(";")
             indices = [label_vocab[ec] for ec in ec_labels if ec in label_vocab]
             label = torch.zeros(int(num_classes))
             if indices:
                 label[indices] = 1.0
         else:
-            # 回退到原始逻辑：逗号分隔的整数索引
+            # Fall back to the original comma-separated integer-index format.
             mlb = MultiLabelBinarizer(classes=range(int(num_classes)))
             label = str(label)
             label = torch.tensor(
@@ -186,14 +186,14 @@ def parse_label_poor(label, task_type, num_classes, label_vocab):
             list(map(int, label.strip("[]").replace("\n", " ").split()))
         )
     elif task_type == "classification" and label_vocab is not None:
-        # 字符串标签（如 CATH fold "1.10"）通过 label_vocab 映射为整数索引
+        # Map string labels (e.g. CATH fold "1.10") to integer indices with label_vocab.
         label_str = str(label)
         if label_str not in label_vocab:
             return None
         label = torch.tensor(label_vocab[label_str])
     elif task_type in ("regression", "pair_regression"):
-        # 回归 label 必须走 float：pandas 会把连续 label 列读成 float64，
-        # 先 int() 会把 4.31 静默截断成 4（poor_lba 96% 的样本会被改值）
+        # Regression labels must use float: pandas reads continuous labels as float64.
+        # Converting to int first silently truncates 4.31 to 4 (affecting 96% of poor_lba).
         try:
             label = torch.tensor(float(label), dtype=torch.float32)
         except (TypeError, ValueError):
@@ -212,37 +212,37 @@ def parse_label_poor(label, task_type, num_classes, label_vocab):
 
 
 # ---------------------------------------------------------------------------
-# 并行数据读取 worker（必须是顶层函数以便 pickle）
+# Parallel data-loading worker (must be top-level to support pickling)
 # ---------------------------------------------------------------------------
 
 def read_data_poor(aa_seq, struct_file, label, unique_id,
                    task_type, num_classes, smiles, csv_name,
                    pdb_dir, label_vocab, sequence_only=False, ecfp4=None,
                    parse_structure=True):
-    """读取单条数据，返回与 KPLM ProteinDataset 相同格式的 dict 或 None。"""
+    """Read one sample and return a KPLM ProteinDataset-compatible dict or None."""
     try:
         if unique_id is None:
             unique_id = str(hash(aa_seq))
 
-        # ---- 标签解析 ----
+        # ---- Label parsing ----
         label = parse_label_poor(label, task_type, num_classes, label_vocab)
         if label is None:
             return None
 
-        # ---- 残基级任务：label 长度必须与序列一致（不依赖结构文件）----
-        # sequence_only 或无结构文件的分支不会走到下方结构解析处的长度过滤，
-        # 错位样本会在 __getitem__ 里被补 0（0 是合法类、参与 loss）或被
-        # 静默截断，这里直接丢弃
+        # ---- Residue tasks: require label/sequence length agreement without structure parsing. ----
+        # sequence_only and missing-structure branches bypass the structural length filter below.
+        # Otherwise __getitem__ may pad misaligned labels with valid class 0 (included in loss)
+        # or silently truncate them. Reject these samples here.
         if task_type in ("contact", "residual_classification",
                          "residual_binary_classification"):
             if label.shape[0] != len(aa_seq):
                 return None
 
-        # ---- 结构文件解析 ----
+        # ---- Structure parsing ----
         name = str(hash(struct_file)) if struct_file is not None else str(hash(aa_seq))
 
-        # sequence_only 模式：跳过结构文件加载，直接使用 CSV 中的 aa_seq
-        # 适用于 纯序列蛋白质语言模型，避免加载大量 PDB 文件
+        # sequence_only: skip structure loading and use aa_seq from the CSV.
+        # Intended for sequence-only protein language models; avoids loading many PDB files.
         if sequence_only or struct_file is None:
             return {
                 "name": name,
@@ -256,12 +256,12 @@ def read_data_poor(aa_seq, struct_file, label, unique_id,
                 "struct_file": struct_file,
             }
 
-        # parse_structure=False：模型只消费 pdb_path/struct_file（3Di/SST
-        # 预计算缓存或自行重解析，如 saprot/prost_t5/protrek_struct/prosst/
-        # mulan），跳过结构解析与 plddt 读取，数据集构建从几十分钟降到秒级。
-        # 缓存未命中时模型侧回退 fallback 3Di（与结构缺失行为一致）。
-        # 注意：残基级任务由调用方保证 parse_structure=True（加载期需要
-        # 结构序列长度过滤错位样本）。
+        # parse_structure=False: models consume only pdb_path/struct_file via cached 3Di/SST
+        # or their own parsers (saprot/prost_t5/protrek_struct/prosst/mulan).
+        # Skipping structure and pLDDT parsing reduces dataset construction from minutes to seconds.
+        # On cache misses the model uses fallback 3Di, as for missing structures.
+        # Callers must set parse_structure=True for residue-level tasks to filter samples
+        # whose structure sequence lengths do not align with their labels.
         if not parse_structure:
             if "|" in struct_file:
                 full_path = "|".join(
@@ -284,8 +284,8 @@ def read_data_poor(aa_seq, struct_file, label, unique_id,
         if struct_file is not None:
             if "|" not in struct_file:
                 structure = _load_structure(pdb_dir, struct_file)
-                # 残基级任务：结构可能缺失残基，若结构序列或标签长度与 aa_seq
-                # 不一致，embedding 与逐残基 label 会错位，直接丢弃该样本
+                # Structures may omit residues. If structure sequence or label lengths differ
+                # from aa_seq, embeddings and residue labels are misaligned; reject the sample.
                 if task_type in ("contact", "residual_classification",
                                  "residual_binary_classification"):
                     if len(structure.sequence) != len(aa_seq) or label.shape[0] != len(aa_seq):
@@ -304,7 +304,7 @@ def read_data_poor(aa_seq, struct_file, label, unique_id,
                     "struct_file": struct_file,
                 }
             else:
-                # PPI：多个结构文件用 | 分隔
+                # PPI: multiple structure filenames are separated by |.
                 structures, sequences = [], []
                 for _struct_file in struct_file.split("|"):
                     structure = _load_structure(pdb_dir, _struct_file)
@@ -342,7 +342,7 @@ def read_data_poor(aa_seq, struct_file, label, unique_id,
 
 def read_bank_sample(key, aa_seq, struct_file, pdb_dir, sequence_only=False,
                      parse_structure=True):
-    """加载去重后的单条蛋白质（PPI embedding bank 用），返回 dict 或 None。"""
+    """Load a deduplicated protein for the PPI embedding bank; return a dict or None."""
     try:
         if sequence_only or struct_file is None:
             return {
@@ -356,7 +356,7 @@ def read_bank_sample(key, aa_seq, struct_file, pdb_dir, sequence_only=False,
                 "smiles": None,
                 "ecfp4": None,
             }
-        # 见 read_data_poor：只消费 pdb_path 的模型跳过结构解析
+        # As in read_data_poor: models consuming only pdb_path skip structure parsing.
         if not parse_structure:
             return {
                 "key": key,
@@ -389,21 +389,21 @@ def read_bank_sample(key, aa_seq, struct_file, pdb_dir, sequence_only=False,
 
 
 # ---------------------------------------------------------------------------
-# Dataset 类
+# Dataset class
 # ---------------------------------------------------------------------------
 
 class PoorProteinDataset(Dataset):
-    """Poor benchmark 数据集，与 KPLM 的 ProteinDataset 接口兼容。
+    """Poor benchmark dataset, compatible with the KPLM ProteinDataset interface.
 
-    相比 ProteinDataset 的主要差异：
-      - CSV 使用 ``struct_file`` 列（文件名），通过 ``pdb_dir`` 拼接完整路径
-      - 支持 .pdb 和 .cif 结构文件
-      - ``multi_labels_classification`` 的 label 为分号分隔的 EC 编号字符串，
-        通过 ``label_vocab_path`` 指定的词表文件映射为 multi-hot 向量
-      - ``parse_structure=False`` 时跳过结构文件解析（只保留 pdb_path），
-        供只消费 3Di/SST 缓存的模型（saprot/prost_t5/protrek_struct/
-        prosst/mulan）使用；消费坐标 X 的模型（esm3/esm_if1）与残基级
-        任务必须保持 True
+    Main differences from ProteinDataset:
+      - CSVs use ``struct_file`` filenames, resolved relative to ``pdb_dir``.
+      - Both .pdb and .cif structures are supported.
+      - ``multi_labels_classification`` labels contain semicolon-separated EC numbers,
+        mapped to multi-hot vectors using the vocabulary at ``label_vocab_path``.
+      - ``parse_structure=False`` skips parsing and retains only pdb_path for models
+        consuming cached 3Di/SST (saprot/prost_t5/protrek_struct/prosst/mulan).
+        Models consuming coordinates X (esm3/esm_if1) and residue-level tasks
+        must keep this option True.
     """
 
     def __init__(self, csv_file, pretrain_model_name="esm2_650m",
@@ -418,20 +418,20 @@ class PoorProteinDataset(Dataset):
         self.num_classes = num_classes
         self.embedding_bank = None
 
-        # 加载标签词表（EC 编号 → 整数索引）
+        # Load the label vocabulary (EC numbers -> integer indices).
         self.label_vocab = None
         if label_vocab_path is not None:
             self.label_vocab = load_label_vocab(label_vocab_path)
             print(f"PoorProteinDataset: loaded {len(self.label_vocab)} labels from {label_vocab_path}")
 
-        # 读取 CSV
+        # Read the CSV.
         csv_data = pd.read_csv(csv_file)
 
-        # 检测 PPI 双序列格式（aa_seq1/aa_seq2 + struct_file1/struct_file2）
+        # Detect PPI paired-sequence columns (aa_seq1/aa_seq2 + struct_file1/struct_file2).
         is_ppi = "aa_seq1" in csv_data.columns and "aa_seq2" in csv_data.columns
 
-        # PPI + 预提取 embedding 模式：对唯一蛋白质去重提取 embedding 存入 bank，
-        # 每条 pair 样本只保存两个引用，避免按 pair 存储拼接 embedding 导致内存爆炸
+        # PPI with precomputed embeddings: deduplicate proteins and store embeddings in a bank.
+        # Each pair stores two references, avoiding memory blowup from duplicated pair embeddings.
         if is_ppi and pretrain_model_interface is not None:
             self.pretrain_model_interface = pretrain_model_interface
             self._build_ppi_embedding_bank(csv_data, pdb_dir, sequence_only,
@@ -440,21 +440,21 @@ class PoorProteinDataset(Dataset):
                   f"{len(self.embedding_bank)} unique proteins from {csv_file}")
             return
 
-        # SMILES 列名适配：kcat/lba/lbs 用 ligand_smiles，其他用 smiles
+        # SMILES column: kcat/lba/lbs use ligand_smiles; other tasks use smiles.
         smiles_col = None
         for col in ("smiles", "ligand_smiles"):
             if col in csv_data.columns:
                 smiles_col = col
                 break
 
-        # ECFP4 预计算指纹列优先（稀疏 bit 索引），省去 RDKit 现算并规避解析失败
+        # Prefer precomputed ECFP4 sparse bit indices to avoid RDKit work and parsing failures.
         ecfp4_col = "ligand_ecfp4" if "ligand_ecfp4" in csv_data.columns else None
 
         path_list = []
         for i in range(len(csv_data)):
             row = csv_data.iloc[i]
             if is_ppi:
-                # PPI: 两个蛋白质序列/结构用 | 连接，与 read_data_poor 的 PPI 分支匹配
+                # PPI: join the two sequences/structures with |, matching read_data_poor.
                 aa_seq = str(row["aa_seq1"]) + "|" + str(row["aa_seq2"])
                 sf1 = row.get("struct_file1")
                 sf2 = row.get("struct_file2")
@@ -492,9 +492,9 @@ class PoorProteinDataset(Dataset):
                 parse_structure,
             ))
 
-        # 默认上限 16 线程：8 个训练进程并发时 -1（全部物理核）会造成
-        # 数千线程的上下文切换开销（PPI 卡死事故的根因），可用
-        # POOR_PMAP_NJOBS 环境变量覆盖
+        # Default to at most 16 workers: -1 uses all physical cores and eight concurrent
+        # training processes cause excessive thread switching (the cause of PPI hangs).
+        # Override with the POOR_PMAP_NJOBS environment variable.
         self.data = pmap_multi(read_data_poor, path_list,
                                n_jobs=int(os.environ.get(
                                    "POOR_PMAP_NJOBS", min(16, os.cpu_count() or 1))))
@@ -523,8 +523,8 @@ class PoorProteinDataset(Dataset):
 
     def _build_ppi_embedding_bank(self, csv_data, pdb_dir, sequence_only,
                                   parse_structure=True):
-        """PPI 去重 embedding bank：每条唯一蛋白质只提取一次 embedding，
-        每个 pair 样本只保存两个引用（key_A/key_B），在 __getitem__ 时即时拼接。"""
+        """PPI embedding bank: embed each unique protein once; each pair stores two references
+        (key_A/key_B), concatenated on demand in __getitem__."""
         bank_args = {}
         pair_rows = []
         for i in range(len(csv_data)):
@@ -542,7 +542,7 @@ class PoorProteinDataset(Dataset):
             if label is None:
                 continue
 
-            # 结构模型按 struct_file 去重（结构决定坐标），纯序列模型按序列去重
+            # Structure models deduplicate by struct_file; sequence-only models by sequence.
             if sequence_only:
                 key1, key2 = seq1, seq2
             else:
@@ -580,15 +580,15 @@ class PoorProteinDataset(Dataset):
             for s, r in zip(bank_samples, results)
         }
 
-        # 每条蛋白的 embedding 分别裁剪到 max_length（config seq_len），再拼接；
-        # 不做拼接后的整体裁剪，避免 B 蛋白尾部被丢
+        # Clip each protein embedding to max_length (config seq_len), then concatenate.
+        # Do not clip the combined pair, which would discard the tail of protein B.
         per_protein_max = self.max_length
         for v in self.embedding_bank.values():
             v["embedding"] = v["embedding"][:per_protein_max]
             v["attention_mask"] = v["attention_mask"][:per_protein_max]
 
-        # max_length 取裁剪后的真实最大拼接长度（无分隔位，≤ 2*per_protein_max），
-        # __getitem__ 的 pad_data 只做 padding，不再截断
+        # Use the actual maximum clipped pair length (no separator; <=2*per_protein_max).
+        # __getitem__.pad_data only pads; it no longer truncates.
         if self.data:
             emb_lens = {k: v["embedding"].shape[0]
                         for k, v in self.embedding_bank.items()}
@@ -607,7 +607,7 @@ class PoorProteinDataset(Dataset):
 
     def __getitem__(self, idx):
         if self.embedding_bank is not None:
-            # PPI bank 模式：A/B embedding 直接拼接（无分隔位），再 pad 到 max_length
+            # PPI bank: concatenate A/B embeddings without a separator, then pad to max_length.
             max_length_batch = self.max_length
             d = self.data[idx]
             entry_A = self.embedding_bank[d["key_A"]]

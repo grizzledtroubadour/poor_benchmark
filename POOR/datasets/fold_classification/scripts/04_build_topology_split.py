@@ -45,11 +45,11 @@ print("Loading data ...")
 summary = pd.read_csv(SUMMARY_CSV)
 core_cols = ["unique_id", "aa_seq", "struct_file"]
 if POOL_CSV.exists():
-    # 默认：03_build_domain_pool.py 从 summary+CATH 参考序列重建的样本池
+    # Default: pool rebuilt from summary and CATH reference sequences by step 03.
     print(f"  pool: {POOL_CSV}")
     pool_all = pd.read_csv(POOL_CSV)[core_cols]
 else:
-    # 回退：v1 C.A 粒度划分备份（与 03 产物行级等价，保留作历史对照）
+    # Fallback: historical v1 C.A-level split backups, row-equivalent to step 03 outputs.
     print(f"  pool: fallback to {BACKUP_DIR} (v1 C.A splits)")
     old_train = pd.read_csv(BACKUP_DIR / "cath_train.csv", dtype={"label": str})
     old_val = pd.read_csv(BACKUP_DIR / "cath_val.csv", dtype={"label": str})

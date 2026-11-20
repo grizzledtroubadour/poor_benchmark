@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-r"""结构同源 OOD 计算（homology-ood-annotation skill 第 2 步）。
+r"""Structural-homology OOD computation (homology-ood-annotation step 2).
 
-统一口径（以 fold_classification/scripts/annotate_test_ood.py 为基准）：
-- 搜索方向：query = test 结构，target = train+val 结构
-- 工具：foldseek `easy-search`，输出 `query,target,alntmscore`
-- 判定：每个 test 结构取对 ref 的 max alntmscore；无 hit 按 0.0 计
+Canonical definition based on fold_classification/scripts/annotate_test_ood.py:
+- Search: query=test structures, target=train+val structures.
+- Tool: foldseek easy-search with query,target,alntmscore output.
+- Maximum reference alntmscore per test structure; no hit means 0.0.
   TM-score_<T> = (max alntmscore < T)
-- query id 取结构文件名去路径与扩展名（与 fold 脚本对 foldseek 输出的
-  归一化一致：`str.replace(r"\.pdb$","")` + 取路径末段）
+- Query IDs remove paths and structure extensions, matching fold normalization:
+  `str.replace(r"\.pdb$","")` followed by the final path component.
 
-输入结构：--test-structs / --ref-structs 各接受一个 PDB/mmCIF 目录
-（取其中全部 *.pdb / *.cif）或一个清单文件（每行一个结构文件路径）。
+--test-structs / --ref-structs each accept a PDB/mmCIF directory
+(all *.pdb / *.cif files) or a manifest with one structure path per line.
 
-m8 缓存：--m8-cache 指向的 m8 已存在时仅重放判定（无需 foldseek）；
-不存在时运行 foldseek 并把 m8 写到该路径供下次复用。
+m8 cache: replay existing --m8-cache results without foldseek;
+otherwise run foldseek and save m8 to that path for reuse.
 
-输出：每个 test 结构一行：query_id, max_alntmscore, TM-score_<T>...
+Output: one row per test structure: query_id, max_alntmscore, TM-score_<T>...
 
-用法：
+Usage:
     python struct_homology_ood.py --test-structs pdbs_test.txt \
         --ref-structs pdbs_trainval.txt --out tm_flags.csv \
         --m8-cache ood_foldseek_test_vs_trainval.m8
-    # 仅重放已有 m8（不需要 foldseek）
+    # Replay existing m8 without foldseek.
     python struct_homology_ood.py --test-structs pdbs_test.txt \
         --ref-structs pdbs_trainval.txt --out replay.csv --m8-cache existing.m8
 """
@@ -42,21 +42,21 @@ def parse_args():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--test-structs", required=True, type=Path,
-                    help="test 结构目录或清单文件（每行一个结构路径）")
+                    help="Test structure directory or manifest with one path per line")
     ap.add_argument("--ref-structs", required=True, type=Path,
-                    help="train+val 结构目录或清单文件")
+                    help="Train+val structure directory or manifest")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--thresholds", default=DEFAULT_THRESHOLDS,
-                    help="逗号分隔的 alntmscore 阈值（max < 阈值 → True）")
+                    help="Comma-separated alntmscore thresholds: maximum < threshold means True")
     ap.add_argument("--m8-cache", type=Path, default=None,
-                    help="m8 缓存路径：存在则仅重放；不存在则搜索后写入复用")
+                    help="m8 cache: replay if present, otherwise search and save")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--tmp-dir", type=Path, default=None)
     return ap.parse_args()
 
 
 def struct_list(spec):
-    """目录 → 全部结构文件；文件 → 每行一个路径。"""
+    """Directory -> all structure files; manifest -> one path per line."""
     if spec.is_dir():
         files = sorted(p for p in spec.iterdir() if p.suffix.lower() in STRUCT_EXTS)
     else:
@@ -68,16 +68,16 @@ def struct_list(spec):
                     files.append(Path(line))
     missing = [p for p in files if not p.exists()]
     if missing:
-        sys.exit(f"错误：{spec} 中 {len(missing)} 个结构文件不存在，"
-                 f"如 {missing[0]}")
+        sys.exit(f"Error: {spec} lists {len(missing)} missing structure files, "
+                 f"for example {missing[0]}")
     return files
 
 
 def normalize_id(name):
-    """fold 脚本的 query 归一化：去结构扩展名（.pdb/.cif/.ent，大小写不敏感）、
-    取路径末段。foldseek createdb 对任何结构扩展名都会剥掉，mmCIF 输入
-    （如 8RRI_K.CIF）在 m8 中同样以去扩展名形式出现，必须一并剥除，
-    否则 .cif query 会全部误判为无 hit。"""
+    """Normalize query IDs: strip .pdb/.cif/.ent case-insensitively and take the basename.
+    foldseek createdb removes any structure extension, including mmCIF inputs
+    such as 8RRI_K.CIF, so strip those extensions too.
+    Otherwise every .cif query would incorrectly appear to have no hit."""
     s = str(name)
     low = s.lower()
     for ext in STRUCT_EXTS:
@@ -89,8 +89,8 @@ def normalize_id(name):
 
 def run_foldseek(q_dir, t_dir, m8_path, tmp_dir, threads):
     if shutil.which("foldseek") is None:
-        sys.exit("错误：未在 PATH 找到 foldseek。请安装 foldseek 后重试，"
-                 "或用 --m8-cache 指向已有 m8 仅重放判定（重放模式不需要 foldseek）。")
+        sys.exit("Error: foldseek not found on PATH. Install it and retry, "
+                 "or use --m8-cache to replay existing m8 without foldseek.")
     cmd = ["foldseek", "easy-search", str(q_dir), str(t_dir), str(m8_path),
            str(tmp_dir / "foldseek_tmp"),
            "--format-output", "query,target,alntmscore",
@@ -100,7 +100,7 @@ def run_foldseek(q_dir, t_dir, m8_path, tmp_dir, threads):
 
 
 def parse_m8_max_tm(m8_path):
-    """每个 query 的 max alntmscore；跳过 q==t 自比对。"""
+    """Maximum alntmscore per query; skip q==t self-alignments."""
     max_tm = {}
     with open(m8_path) as f:
         for line in f:
@@ -128,8 +128,8 @@ def main():
     tmp_ctx = None
     if replay:
         m8_path = args.m8_cache
-        print(f"重放已有 m8：{m8_path}（不调用 foldseek）")
-        # 重放模式仍需 test 清单以确定输出行
+        print(f"Replaying existing m8: {m8_path} (without foldseek)")
+        # Replay still requires the test manifest to determine output rows.
         test_files = struct_list(args.test_structs)
         query_ids = [normalize_id(p.name) for p in test_files]
     else:
@@ -137,13 +137,13 @@ def main():
         ref_files = struct_list(args.ref_structs)
         query_ids = [normalize_id(p.name) for p in test_files]
         if len(set(query_ids)) != len(query_ids):
-            sys.exit("错误：test 结构 id（文件名去扩展名）存在重复，无法一一对应")
-        print(f"test 结构：{len(test_files)}，ref 结构：{len(ref_files)}")
+            sys.exit("Error: duplicate test structure IDs after removing extensions prevent one-to-one matching")
+        print(f"Test structures: {len(test_files)}; reference structures: {len(ref_files)}")
         tmp_ctx = (tempfile.TemporaryDirectory(prefix="struct_homology_")
                    if args.tmp_dir is None else None)
         tmp_dir = args.tmp_dir or Path(tmp_ctx.name)
         tmp_dir.mkdir(parents=True, exist_ok=True)
-        # foldseek 需要结构文件目录，用符号链接避免拷贝（fold 脚本同款做法）
+        # foldseek requires directories; use symlinks instead of copying, as in fold.
         q_dir, t_dir = tmp_dir / "fs_query", tmp_dir / "fs_target"
         q_dir.mkdir(exist_ok=True)
         t_dir.mkdir(exist_ok=True)
@@ -160,7 +160,7 @@ def main():
         run_foldseek(q_dir, t_dir, m8_path, tmp_dir, args.threads)
 
     max_tm = parse_m8_max_tm(m8_path)
-    print(f"有 hit 的 query：{len(max_tm)} / {len(query_ids)}")
+    print(f"Queries with hits: {len(max_tm)} / {len(query_ids)}")
 
     rows = []
     flags_by_label = {label: [] for label in thr_labels}
@@ -173,16 +173,16 @@ def main():
             flags_by_label[label].append(v)
         rows.append(row)
 
-    # 阶梯单调性自检
+    # Check threshold monotonicity.
     asc = sorted(zip(thresholds, thr_labels))
     for (_, lo), (_, hi) in zip(asc, asc[1:]):
         for a, b in zip(flags_by_label[lo], flags_by_label[hi]):
-            assert a <= b, f"阶梯单调性破坏: {lo} vs {hi}（query 行）"
+            assert a <= b, f"Threshold monotonicity violated: {lo} vs {hi} (query row)"
 
     out = pd.DataFrame(rows)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(args.out, index=False, lineterminator="\n")
-    print(f"-> {args.out}（{len(out)} 行）")
+    print(f"-> {args.out} ({len(out)} rows)")
     for label in thr_labels:
         print(f"  TM-score_{label}: {sum(flags_by_label[label])}")
     if tmp_ctx is not None:

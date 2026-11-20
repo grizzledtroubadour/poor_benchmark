@@ -17,17 +17,17 @@ Also fixes:
   - Foldseek cache regenerated (test pool changed)
   - Path uses dynamic ROOT instead of hardcoded
 
-NOTE (2026-08 统一整理):
-  - §1 mmseqs2 / §2 Foldseek：[superseded] 正式重算以
+NOTE (canonical workflow consolidated 2026-08):
+      - §1 mmseqs2 / §2 Foldseek: superseded; canonical recomputation uses
     `.skills/homology-ood-annotation/scripts/seq_homology_ood.py` /
-    `struct_homology_ood.py` 为准（easy-search 口径，缓存可 --m8-cache 重放）。
-  - §4 IDR：[superseded] 统一工具为 `.skills/ood-annotation-toolkit/scripts/idr_ood.py`
-    （本任务口径 --mode region-ratio --clean map --threshold 0.3）。
-  - §5 EC：[superseded] NewEC/LongTailEC 统一为 all-not-in 口径，由
+            struct_homology_ood.py (easy-search; replay caches with --m8-cache).
+      - §4 IDR: superseded by .skills/ood-annotation-toolkit/scripts/idr_ood.py
+            with --mode region-ratio --clean map --threshold 0.3 for this task.
+      - §5 EC: NewEC/LongTailEC now use canonical all-not-in semantics, written by
     `.skills/ec-function-ood-annotation/scripts/add_unified_newec.py` /
-    `add_unified_longtail_ec.py` 落盘；本段产出的 OOD_LongTail_EC_L4 旧列已删除。
-  - §3 长度列 / §6 Default / §7 Default=False 置 NaN 为本脚本保留的独有逻辑；
-    NaN/InD 收尾现以 `.skills/ood-annotation-toolkit/scripts/finalize_ood_columns.py` 为准。
+            add_unified_longtail_ec.py; the legacy OOD_LongTail_EC_L4 output was removed.
+      - §3 length / §6 Default / §7 Default=False-to-NaN retain unique logic here;
+            NaN/InD finalization uses .skills/ood-annotation-toolkit/scripts/finalize_ood_columns.py.
 
 Inputs:
   - splits/ppi_{train,val,test}.csv
@@ -85,7 +85,7 @@ EC_LEVEL = 4
 
 # ---------------------------------------------------------------------------
 # 1. mmseqs2: seq_Redundancy + OOD_Orphan
-# [superseded] 正式重算以 .skills/homology-ood-annotation/scripts/seq_homology_ood.py 为准
+# Superseded: use .skills/homology-ood-annotation/scripts/seq_homology_ood.py.
 # ---------------------------------------------------------------------------
 
 def write_unique_fasta(df, out_fasta):
@@ -103,11 +103,11 @@ def write_unique_fasta(df, out_fasta):
 
 
 def run_mmseqs_search(query_fasta, target_fasta, output_m8, tmp_dir):
-    # 2026-08-27 起统一为 easy-search -s 7.5（默认 e-value <= 1e-3 显著性门槛），
-    # 与其他任务及 homology-ood-annotation skill 一致；旧式宽松参数
-    # (--min-seq-id 0.0 -c 0.0 --cov-mode 0 -e 100) 会把 9-25 aa 弱局部比对计入
-    # max pident，口径与其他任务不可比（统一重算备份
-    # output/backup_before_easysearch_unify/）。旧缓存（旧参数产物）需删除后重跑。
+    # Since 2026-08-27, use easy-search -s 7.5 (default significance e-value <=1e-3),
+    # matching other tasks and the homology skill. Legacy permissive settings
+    # (--min-seq-id 0.0 -c 0.0 --cov-mode 0 -e 100) include weak 9–25-aa alignments
+    # in max pident, preventing comparison across tasks. Unified-recomputation backup:
+    # output/backup_before_easysearch_unify/. Delete old-parameter caches before rerunning.
     subprocess.run(
         ["mmseqs", "easy-search", str(query_fasta), str(target_fasta), str(output_m8),
          str(Path(tmp_dir) / "mmseqs_tmp"),
@@ -180,7 +180,7 @@ def add_seq_redundancy_cols(test, max_identity):
 
 # ---------------------------------------------------------------------------
 # 2. Foldseek: TM-score
-# [superseded] 正式重算以 .skills/homology-ood-annotation/scripts/struct_homology_ood.py 为准
+# Superseded: use .skills/homology-ood-annotation/scripts/struct_homology_ood.py.
 # ---------------------------------------------------------------------------
 
 def build_protein_to_structure_map():
@@ -249,10 +249,10 @@ def compute_foldseek_tmscore(train, val, test):
         os.makedirs(fs_tmp, exist_ok=True)
 
         print("  Running Foldseek easy-search...")
-        # 2026-08-27 起统一为 foldseek easy-search（默认 e-value <= 10 门槛，
-        # 与其他任务及 homology-ood-annotation skill 一致）；旧式
-        # `search -a -e inf` 保留全部弱 hit，会抬高 max alntmscore、压低低阈值
-        # OOD（统一重算备份 output/backup_before_foldseek_easysearch_unify/）。
+        # Since 2026-08-27 use foldseek easy-search (default e-value <=10), matching other
+        # tasks and the homology skill. Legacy search -a -e inf retains weak hits,
+        # inflating maximum alntmscore and suppressing low-threshold OOD counts.
+        # Unified-recomputation backup: output/backup_before_foldseek_easysearch_unify/.
         subprocess.run(["foldseek", "easy-search", query_dir, target_dir,
                          output_tsv, fs_tmp,
                          "--format-output", "query,target,alntmscore"],
@@ -306,7 +306,7 @@ def add_extreme_length_cols(test):
 
 # ---------------------------------------------------------------------------
 # 4. IDR (metapredict v3)
-# [superseded] 统一工具为 .skills/ood-annotation-toolkit/scripts/idr_ood.py
+# Superseded by .skills/ood-annotation-toolkit/scripts/idr_ood.py.
 # （--mode region-ratio --clean map --threshold 0.3）
 # ---------------------------------------------------------------------------
 
@@ -409,8 +409,8 @@ def compute_idr(test):
 
 # ---------------------------------------------------------------------------
 # 5. EC OOD
-# [superseded] 统一为 all-not-in 口径（.skills/ec-function-ood-annotation/scripts/
-# add_unified_newec.py / add_unified_longtail_ec.py）；OOD_LongTail_EC_L4 旧列已删除
+# Superseded: canonical all-not-in definitions in .skills/ec-function-ood-annotation/scripts/
+# add_unified_newec.py / add_unified_longtail_ec.py; legacy OOD_LongTail_EC_L4 removed.
 # ---------------------------------------------------------------------------
 
 def load_uniprot_ec():
@@ -584,11 +584,11 @@ def main():
     print(f"  OOD_NewEC_L4: {test['OOD_NewEC_L4'].sum()}")
     print(f"  OOD_LongTail_EC_L4: {test['OOD_LongTail_EC_L4'].sum()}")
 
-    # 6. Default=False（预挑出极长行）收尾：除 OOD_ExtremeLong（预挑出原因列）
-    #    外全部 OOD/同源/结构列置 NaN（含 OOD_ExtremeShort），表示"未计算"。
-    #    2026-08-27 起与其他任务 Default=False 行惯例统一（此前 seq/TM 列对
-    #    全行计算、OOD_ExtremeShort 保留，备份 output/backup_before_nondefault_full_nan/）。
-    print("\n=== 6. Default=False 行置 NaN（仅保留 OOD_ExtremeLong）===")
+    # 6. Default=False pre-reserved extreme-long rows: preserve OOD_ExtremeLong only;
+    # set every other OOD/homology/structure field (including ExtremeShort) to NaN: not computed.
+    # Unified with other tasks since 2026-08-27. Previously seq/TM were computed for all rows
+    # and ExtremeShort retained; backup: output/backup_before_nondefault_full_nan/.
+    print("\n=== 6. Set Default=False rows to NaN (preserve OOD_ExtremeLong only)===")
     nd = ~test["Default"]
     nan_cols = ([c for c in test.columns
                  if c.startswith("OOD_") and c != "OOD_ExtremeLong"]
@@ -599,7 +599,7 @@ def main():
             ser = test[c].astype(object)
             ser.loc[nd] = np.nan
             test[c] = ser
-    print(f"  {int(nd.sum())} 行 x {len(nan_cols)} 列置 NaN")
+    print(f"  {int(nd.sum())} rows x {len(nan_cols)} columns set to NaN")
 
     # --- Reorder columns ---
     base_cols = ["unique_id", "protein_A_id", "protein_B_id",

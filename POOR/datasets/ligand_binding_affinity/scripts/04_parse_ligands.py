@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-脚本：04_parse_ligands.py
-用途：解析 PDBbind v2020.R1 清洗后数据中的配体分子，生成 canonical SMILES 与 ECFP4 指纹。
+Script: 04_parse_ligands.py
+Purpose: Parse ligands in cleaned PDBbind v2020.R1 data to generate canonical SMILES and ECFP4 fingerprints.
 
-使用：
+Usage:
     cd binding_affinity/
     python scripts/04_parse_ligands.py
 
-输入：
+Input:
     output/pdbbind_v2020_metadata_cleaned.csv
 
-输出：
+Output:
     output/pdbbind_v2020_metadata_ligand.csv
     output/pdbbind_v2020_metadata_ligand_stats.json
     output/ligand_parse_failures.csv
@@ -26,12 +26,12 @@ import pandas as pd
 from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem
 
-# 抑制 RDKit 大量 warning
+# Suppress verbose RDKit warnings.
 RDLogger.DisableLog("rdApp.*")
 
 
 def parse_ligand_from_sdf(path: Path):
-    """从 SDF 文件解析配体，返回 (mol, error_msg)。"""
+    """Parse a ligand from SDF and return (mol, error_msg)."""
     if not path.exists():
         return None, "SDF file not found"
     try:
@@ -48,7 +48,7 @@ def parse_ligand_from_sdf(path: Path):
 
 
 def parse_ligand_from_mol2(path: Path):
-    """从 MOL2 文件解析配体，返回 (mol, error_msg)。"""
+    """Parse a ligand from MOL2 and return (mol, error_msg)."""
     if not path.exists():
         return None, "MOL2 file not found"
     try:
@@ -63,7 +63,7 @@ def parse_ligand_from_mol2(path: Path):
 
 
 def get_canonical_smiles(mol):
-    """获取 canonical SMILES。"""
+    """Get canonical SMILES."""
     try:
         return Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
     except Exception:
@@ -71,7 +71,7 @@ def get_canonical_smiles(mol):
 
 
 def get_ecfp4(mol, radius=2, n_bits=2048):
-    """计算 ECFP4（Morgan）指纹，返回为 1 位索引列表。"""
+    """Compute an ECFP4 (Morgan) fingerprint and return indices of set bits."""
     try:
         fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius=radius, nBits=n_bits)
         on_bits = sorted([int(i) for i in fp.GetOnBits()])
@@ -81,7 +81,7 @@ def get_ecfp4(mol, radius=2, n_bits=2048):
 
 
 def parse_ligand(row, data_dir: Path):
-    """尝试解析单条记录的配体。"""
+    """Try to parse the ligand in one record."""
     pdb_id = row["pdb_id"]
     sdf_rel = row.get("ligand_sdf_file", "")
     mol2_rel = row.get("ligand_mol2_file", "")
@@ -89,18 +89,18 @@ def parse_ligand(row, data_dir: Path):
     sdf_path = data_dir / sdf_rel if pd.notna(sdf_rel) and sdf_rel else None
     mol2_path = data_dir / mol2_rel if pd.notna(mol2_rel) and mol2_rel else None
 
-    # 优先尝试 SDF
+    # Try SDF first.
     mol, error = None, None
     if sdf_path and sdf_path.exists():
         mol, error = parse_ligand_from_sdf(sdf_path)
 
-    # SDF 失败则尝试 MOL2
+    # Try MOL2 if SDF fails.
     if mol is None and mol2_path and mol2_path.exists():
         mol, error = parse_ligand_from_mol2(mol2_path)
         if mol is not None:
             error = None
 
-    # 两者都失败
+    # Both parsers failed.
     if mol is None:
         return {
             "pdb_id": pdb_id,
@@ -161,7 +161,7 @@ def main():
 
     df = pd.read_csv(args.input)
     total = len(df)
-    print(f"[输入] 清洗后样本数: {total}")
+    print(f"[Input] Samples after cleaning: {total}")
 
     results = []
     for _, row in df.iterrows():
@@ -170,18 +170,18 @@ def main():
 
     ligand_df = pd.DataFrame(results)
 
-    # 合并到原表
+    # Merge into the original table.
     merged = df.merge(
         ligand_df,
         on="pdb_id",
         how="left",
     )
 
-    # 过滤解析失败的样本
+    # Filter out samples that failed parsing.
     success_df = merged[merged["ligand_parse_success"] == True].copy()
     failure_df = merged[merged["ligand_parse_success"] != True].copy()
 
-    # 输出
+    # Output
     args.output.parent.mkdir(parents=True, exist_ok=True)
     success_df.to_csv(args.output, index=False)
     failure_df.to_csv(args.failures, index=False)
@@ -198,14 +198,14 @@ def main():
     with open(args.stats, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
 
-    print(f"[输出] 配体解析成功: {len(success_df)}")
-    print(f"[输出] 配体解析失败: {len(failure_df)}")
-    print(f"[输出] 保留比例: {stats['retention_rate']*100:.2f}%")
-    print(f"[输出] 成功样本 CSV: {args.output}")
-    print(f"[输出] 失败样本 CSV: {args.failures}")
-    print(f"[输出] 统计 JSON: {args.stats}")
+    print(f"[Output] Successfully parsed ligands: {len(success_df)}")
+    print(f"[Output] Failed ligand parses: {len(failure_df)}")
+    print(f"[Output] Retention rate: {stats['retention_rate']*100:.2f}%")
+    print(f"[Output] Successful samples CSV: {args.output}")
+    print(f"[Output] Failed samples CSV: {args.failures}")
+    print(f"[Output] Statistics JSON: {args.stats}")
     print()
-    print("=== 失败原因分布 ===")
+    print("=== Failure reason distribution ===")
     for reason, count in stats["failure_reasons"].items():
         print(f"  {reason}: {count}")
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""为 ppi_prediction test 集追加 OOD_FoldHoldout / OOD_SuperfamilyHoldout（CATH+TED 口径）。
+"""Add CATH+TED OOD_FoldHoldout / OOD_SuperfamilyHoldout to PPI test.
 
-样本为蛋白对（protein_A_id/protein_B_id 为 UniProt accession）：
-- 用 skill 的 uniprot 模式标注全部 accession（CATH 经 SIFTS 反查并集 + TED 全长标注）
-- 样本级标签 = 双方标签并集；any 语义；train-only 对称参考
-- holdout 判定复用 .skills/cath-ted-domain-annotation/scripts/cath_ted_holdout.py：
-  先落盘对级标签表（unique_id, topos, sfs, split），再由 skill 脚本统一判定
-- accession 清单为 output/ppi_ted_aug_acc_list.csv（历史一次性生成，生成脚本已删除）
+Samples are protein pairs; protein_A_id/protein_B_id are UniProt accessions:
+- Annotate all accessions in uniprot mode: reverse-map CATH through SIFTS, union with full-length TED.
+- Union both proteins' labels per sample; any semantics; symmetric training-only reference.
+- Reuse .skills/cath-ted-domain-annotation/scripts/cath_ted_holdout.py:
+      first write pair labels (unique_id, topos, sfs, split), then compute canonical holdouts.
+- Accession list: output/ppi_ted_aug_acc_list.csv, historically generated once; original script deleted.
 """
 import csv
 import subprocess
@@ -33,13 +33,13 @@ def toset(s):
     return {x for x in str(s).split(";") if x}
 
 
-# 1. 标注全部 accession（CATH 经 SIFTS 反查并集 + TED 全长标注，离线缓存）
+# 1. Annotate all accessions with reverse-mapped CATH + full-length TED, using offline cache.
 subprocess.run([sys.executable, str(ANNOTATE), "--chains", str(ACC_LIST),
                 "--out", str(LABELS), "--offline"], check=True)
 
 labels = {r["uniprot"]: r for r in csv.DictReader(open(LABELS))}
 
-# 2. 聚合为对级标签表（样本级标签 = 蛋白对双方 accession 标签并集）
+# 2. Aggregate pair labels as the union of both accessions' labels.
 frames = []
 for split in ["train", "val", "test"]:
     df = pd.read_csv(TASK_DIR / f"splits/ppi_{split}.csv",
@@ -65,11 +65,11 @@ for r in all_rows.itertuples(index=False):
 pd.DataFrame(pair_rows).to_csv(PAIR_LABELS, index=False, lineterminator="\n")
 print(f"pair-level labels -> {PAIR_LABELS} (rows={len(pair_rows)})")
 
-# 3. holdout 判定（skill 统一口径：train-only 参考，any 语义，无注释 -> False）
+# 3. Canonical holdouts: training-only reference, any semantics, unannotated -> False.
 subprocess.run([sys.executable, str(HOLDOUT), "--labels", str(PAIR_LABELS),
                 "--split-col", "split", "--out", str(PAIR_FLAGS)], check=True)
 
-# 4. 写回 test splits（Default=False 行置 NaN，与全项目 NaN 惯例一致）
+# 4. Write test splits, setting Default=False rows to NaN by project convention.
 flags = pd.read_csv(PAIR_FLAGS, dtype=str, keep_default_na=False).set_index("unique_id")
 test = pd.read_csv(TEST_CSV, dtype=str, keep_default_na=False)
 for col in HOLDOUT_COLS:

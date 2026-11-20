@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""NewEC / LongTailEC OOD 计算（ec-function-ood-annotation skill 第 2 步）。
+"""NewEC / LongTailEC OOD computation (ec-function-ood-annotation step 2).
 
-统一口径（2026-08-27 定稿）：
-- 层级解析 levels()：EC 段数 ≥3 → L3=前三段；段数 ==4 → L4=完整编号；允许部分 "-"
-- **NewEC**：参考集 = train+val 出现的 EC 集合；**all-not-in** 语义——
-  样本有 EC 注释且其所有 EC（对应层级）都不在参考集中 → True；无 EC 注释 → False
-- **LongTailEC**：参考集 = train（逐样本计数：携带该类别的 train 样本数）；
-  **all-not-in** 语义——样本有 EC 注释且其所有 EC（对应层级）的 train 频次都 < 5 / < 10（**含 0**）→ True
+Canonical definition (finalized 2026-08-27):
+- levels(): EC components >=3 -> L3=first three; exactly four -> L4=full number; partial "-" allowed.
+- **NewEC**：Reference = ECs in train+val; **all-not-in** semantics:
+  annotated sample with every EC at the given level absent from reference -> True; no EC annotation -> False.
+- **LongTailEC**：Reference = training per-sample counts (training samples carrying each class);
+  **all-not-in**: annotated and every EC at the given level has training count <5 / <10 (**including zero**) -> True.
 
-输入两种形式（与 cath_ted_holdout.py 一致）：
-- 单文件：含 `split` 列（train/val/test，`;` 分隔多归属）+ `ec_numbers` 列
-- 双文件：--labels 为 test，--ref-labels 为 train+val（需含 `split` 列区分）
+Two input formats, as in cath_ted_holdout.py:
+- Single file: `split` (train/val/test; semicolon-separated memberships) and `ec_numbers` columns.
+- Two files: --labels is test, --ref-labels is train+val (with `split` to distinguish membership).
 
-输出：仅 test 行，追加 6 列：
+Output: test rows only, with six appended columns:
   OOD_NewEC_L3, OOD_NewEC_L4,
   OOD_LongTail_EC_L3_le5, OOD_LongTail_EC_L3_le10,
   OOD_LongTail_EC_L4_le5, OOD_LongTail_EC_L4_le10
 
-用法：
+Usage:
     python ec_ood.py --labels all_ec_labels.csv --split-col split --out test_flagged.csv
     python ec_ood.py --labels test_ec.csv --ref-labels trainval_ec.csv --out test_flagged.csv
 """
@@ -49,8 +49,8 @@ def level_sets(ecs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--labels", required=True, type=Path, help="test 行（或全量，配 --split-col）")
-    ap.add_argument("--ref-labels", type=Path, help="train+val 参考文件（需 split 列）")
+    ap.add_argument("--labels", required=True, type=Path, help="Test rows, or all rows when using --split-col.")
+    ap.add_argument("--ref-labels", type=Path, help="Train+val reference file; requires a split column.")
     ap.add_argument("--split-col", default="split")
     ap.add_argument("--ec-col", default="ec_numbers")
     ap.add_argument("--out", required=True, type=Path)
@@ -69,7 +69,7 @@ def main():
         ref_rows = [r for r in rows if "train" in r[sc].split(";") or "val" in r[sc].split(";")]
         test_rows = [r for r in rows if "test" in r[sc].split(";")]
 
-    # train+val 集合（NewEC 参考）与 train 频次（LongTailEC 参考）
+    # Train+val set (NewEC reference) and training frequencies (LongTailEC reference).
     tv3, tv4 = set(), set()
     f3, f4 = Counter(), Counter()
     for r in ref_rows:

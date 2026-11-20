@@ -9,7 +9,7 @@ from collections import defaultdict
 from Bio.PDB import MMCIFParser, MMCIFIO, PDBParser, PDBIO, Select
 
 # ==================== Config ====================
-# 脚本内路径为运行目录相对路径，需在含 data/pdb/（项目级原始结构）与 pdbs/ 的工作根下执行
+# Paths are relative to the working directory, which must contain data/pdb/ and pdbs/.
 SOURCE_DIR = 'data/pdb/'
 OUTPUT_DIR = 'pdbs/'
 CHECKPOINT_FILE = 'output/extract_checkpoint.json'
@@ -61,16 +61,16 @@ def extract_from_pdb_text(pdb_path, tasks, output_dir):
     else:
         with open(pdb_path, 'r') as f:
             lines = f.readlines()
-    
+
     results = []
     for task in tasks:
         chain_id = task['chain_id']
         ranges = task['ranges']
         output_path = os.path.join(output_dir, f"{task['chain_key']}.pdb")
-        
+
         out_lines = []
         for line in lines:
-            # Multi-model (NMR) entries: keep model 1 only（根因修复，截断于首个 ENDMDL）
+            # Multi-model (NMR) entries: keep model 1 only, stopping at the first ENDMDL.
             if line.startswith('ENDMDL'):
                 break
             if line.startswith('ATOM  ') or line.startswith('HETATM'):
@@ -88,7 +88,7 @@ def extract_from_pdb_text(pdb_path, tasks, output_dir):
             elif line.startswith('TER'):
                 if out_lines:
                     out_lines.append(line)
-        
+
         if out_lines:
             with open(output_path, 'w') as f:
                 f.writelines(out_lines)
@@ -106,14 +106,14 @@ def extract_from_cif(cif_path, tasks, output_dir):
             structure = parser.get_structure('struct', f)
     else:
         structure = parser.get_structure('struct', cif_path)
-    
+
     io = MMCIFIO()
     results = []
     for task in tasks:
         chain_id = task['chain_id']
         ranges = task['ranges']
         output_path = os.path.join(output_dir, f"{task['chain_key']}.cif")
-        
+
         select = ResidueRangeSelect(chain_id, ranges)
         io.set_structure(structure)
         try:
@@ -132,7 +132,7 @@ def process_pdb(pdb_id, tasks):
     """Process all chains for a single PDB."""
     pdb_path = os.path.join(SOURCE_DIR, f"{pdb_id}.pdb.gz")
     cif_path = os.path.join(SOURCE_DIR, f"{pdb_id}.cif.gz")
-    
+
     if os.path.exists(pdb_path):
         return extract_from_pdb_text(pdb_path, tasks, OUTPUT_DIR)
     elif os.path.exists(cif_path):
@@ -147,19 +147,19 @@ if __name__ == '__main__':
     print("=" * 60)
     print("Representative Structure Extraction")
     print("=" * 60)
-    
-    # Load representative chains（02_select_representative_chains.py 产物）
+
+    # Load representative chains from 02_select_representative_chains.py.
     print("\n[1/4] Loading representative chains...")
     rep_df = pd.read_csv('output/representative_chains.csv')
-    
+
     # Load SIFTS mapping for A-class
     print("[2/4] Loading SIFTS mapping...")
     with open('data/sifts/sifts_uniprot_mapping.json', 'r') as f:
         sifts = json.load(f)
-    
+
     # Load B-boundary inference for B-class
-    # 注意：b_boundary_inference.jsonl 为 B 档边界推断中间产物，未随仓库迁移；
-    # 重跑需先按 DATA_PROCESS.md 2.1 的子序列比对法重新生成（放到 output/ 下）。
+    # b_boundary_inference.jsonl is an intermediate B-tier boundary-inference file not migrated with the repository.
+    # Before rerunning, regenerate it by the subsequence alignment method in DATA_PROCESS.md 2.1, under output/.
     print("[3/4] Loading B-boundary inference...")
     b_boundaries = {}
     with open('output/b_boundary_inference.jsonl', 'r') as f:
@@ -167,18 +167,18 @@ if __name__ == '__main__':
             d = json.loads(line.strip())
             key = f"{d['pdb_id']}_{d['chain_id']}"
             b_boundaries[key] = d
-    
+
     # Build extraction tasks
     print("[4/4] Building extraction parameters...")
     extract_tasks = []
     for _, row in rep_df.iterrows():
         ck = row['chain_key']
         mode = row['extract_mode']
-        
+
         if mode == 'A':
             info = sifts.get(ck, {})
             segments = info.get('segments', [])
-            ranges = [(s.get('pdb_beg'), s.get('pdb_end')) 
+            ranges = [(s.get('pdb_beg'), s.get('pdb_end'))
                       for s in segments if s.get('pdb_beg') and s.get('pdb_end')]
             if not ranges:
                 print(f"WARNING: A-class {ck} no valid segments", file=sys.stderr)
@@ -189,7 +189,7 @@ if __name__ == '__main__':
                 print(f"WARNING: B-class {ck} no boundary", file=sys.stderr)
                 continue
             ranges = [(str(info.get('inferred_pdb_beg')), str(info.get('inferred_pdb_end')))]
-        
+
         extract_tasks.append({
             'chain_key': ck,
             'pdb_id': row['pdb_id'],
@@ -197,45 +197,45 @@ if __name__ == '__main__':
             'mode': mode,
             'ranges': ranges
         })
-    
+
     print(f"\nTotal extraction tasks: {len(extract_tasks):,}")
-    
+
     # Group by pdb_id
     pdb_tasks = defaultdict(list)
     for task in extract_tasks:
         pdb_tasks[task['pdb_id'].upper()].append(task)
     print(f"Unique PDBs: {len(pdb_tasks):,}")
-    
+
     # Checkpoint
     completed_pdbs = set()
     if os.path.exists(CHECKPOINT_FILE):
         with open(CHECKPOINT_FILE, 'r') as f:
             completed_pdbs = set(json.load(f))
         print(f"Resuming: {len(completed_pdbs):,} PDBs already done")
-    
+
     # Process
     all_pdb_ids = sorted(pdb_tasks.keys())
     remaining = [p for p in all_pdb_ids if p not in completed_pdbs]
     print(f"Remaining: {len(remaining):,} PDBs\n")
-    
+
     success_count = 0
     fail_count = 0
     start_time = time.time()
-    
+
     with open(LOG_FILE, 'a') as logf:
         for i, pdb_id in enumerate(remaining):
             tasks = pdb_tasks[pdb_id]
             results = process_pdb(pdb_id, tasks)
-            
+
             for chain_key, ok, size in results:
                 if ok:
                     success_count += 1
                 else:
                     fail_count += 1
                     logf.write(f"FAIL {chain_key}\n")
-            
+
             completed_pdbs.add(pdb_id)
-            
+
             if (i + 1) % 500 == 0:
                 with open(CHECKPOINT_FILE, 'w') as f:
                     json.dump(sorted(list(completed_pdbs)), f)
@@ -243,11 +243,11 @@ if __name__ == '__main__':
                 rate = (i + 1) / elapsed
                 print(f"  {i+1:,}/{len(remaining):,} | Success: {success_count:,} | "
                       f"Fail: {fail_count:,} | Rate: {rate:.1f} PDBs/s")
-    
+
     # Final checkpoint
     with open(CHECKPOINT_FILE, 'w') as f:
         json.dump(sorted(list(completed_pdbs)), f)
-    
+
     print(f"\n{'='*60}")
     print("COMPLETE")
     print(f"{'='*60}")

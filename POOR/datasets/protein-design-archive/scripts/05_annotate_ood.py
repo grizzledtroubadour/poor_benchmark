@@ -202,8 +202,8 @@ test["OOD_NewEC"] = test["OOD_NewEC"].astype(object)
 test.loc[es_mask, "OOD_NewEC"] = np.nan
 
 # ---------------------------------------------------------- Default/Pure
-# extra test set：无"划分前预挑出"样本，按 Default 本意整表 True
-# （2026-08-27 由 False 改判，与 fold "ES 行也是 Default=True" 惯例一致）
+# Extra test set: no samples were preselected before splitting; set Default=True throughout.
+# Changed from False on 2026-08-27, matching the fold convention that ES rows also have Default=True.
 test["Default"] = True
 seq_cols = [f"seq_Redundancy_{t}" for t in SEQ_THRESHOLDS]
 tm_cols = [f"TM-score_{t}" for t in TM_THRESHOLDS]

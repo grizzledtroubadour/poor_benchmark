@@ -3,8 +3,8 @@
 Stage 2: Extract amino acid sequences from filtered PDB entries.
 Only sequences are saved (no coordinate files) to save disk space.
 
-长度下限 MIN_RESIDUES=31（v2 口径，见该常量处注释）：31–59aa 短链一并入池，
-≤30aa 在源头排除。
+Minimum length MIN_RESIDUES=31 (v2; see constant comments): include 31–59-aa chains;
+exclude <=30-aa chains at the source.
 
 Inputs:
     ss_prediction/output/stage1_filtered_entries.csv
@@ -27,7 +27,7 @@ from collections import OrderedDict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 TASK_DIR = Path(__file__).resolve().parent.parent  # datasets/ss_prediction
-ROOT = TASK_DIR.parent.parent                      # 仓库根（POOR）
+ROOT = TASK_DIR.parent.parent                      # Repository root (POOR)
 OUTPUT_DIR = TASK_DIR / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -42,10 +42,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 PDB_DIR = ROOT / "data" / "pdb"
-# v2 口径（2026-09-02 线性化）：MIN_RESIDUES = 31。≤30aa 短链在源头排除，
-# 取代历史路线（原 MIN_RESIDUES=60 过滤 <60 短链，事后经 12–19 恢复
-# 31–59 段并删除 ≤30 段——已归档 output/scripts_archive/）。31–59aa 短链
-# 共 6,453 条随本步一并入池，stage2 产出由 249,018 变为 255,471 条。
+# v2 (linearized 2026-09-02): MIN_RESIDUES=31; exclude <=30-aa chains at the source.
+# Replaces the historical MIN_RESIDUES=60 route, followed by steps 12–19 restoring
+# 31–59-aa chains and removing <=30-aa chains (archived under output/scripts_archive/).
+# Include 6,453 short chains here, increasing stage2 output from 249,018 to 255,471.
 MIN_RESIDUES = 31
 N_WORKERS = 32
 

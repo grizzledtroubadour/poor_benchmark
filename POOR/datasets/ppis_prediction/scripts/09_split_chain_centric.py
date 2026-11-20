@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-划分 Chain-Centric 数据集：
-1. 将链长不在 [60, 1000] 区间内的链作为独立 ExtremeLength 测试集。
-2. 剩余链按 72:8:20 随机划分为 Train / Val / Test。
+Split the chain-centric dataset:
+1. Reserve chains outside [60, 1000] as a separate extreme-length test set.
+2. Randomly split remaining chains into Train / Val / Test with ratio 72:8:20.
 
-输出：
+Output:
     output/chain_centric_splits/chain_centric_train.csv
     output/chain_centric_splits/chain_centric_val.csv
     output/chain_centric_splits/chain_centric_test.csv
@@ -75,14 +75,14 @@ def main():
     args = parser.parse_args()
 
     if abs(sum(args.ratios) - 1.0) > 1e-6:
-        raise ValueError("ratios 之和必须等于 1.0")
+        raise ValueError("ratios must sum to 1.0")
 
     os.makedirs("logs", exist_ok=True)
 
     metadata = load_csv(ROOT / args.metadata)
     logger.info("Loaded %d representative chain records", len(metadata))
 
-    # 1. 分离 ExtremeLength
+    # 1. Separate extreme lengths.
     normal_rows = []
     extreme_rows = []
     for row in metadata:
@@ -97,7 +97,7 @@ def main():
         args.min_len, args.max_len, len(extreme_rows), len(normal_rows),
     )
 
-    # 2. 对 normal 链随机 72:8:20 划分
+    # 2. Randomly split normal-length chains 72:8:20.
     random.seed(args.seed)
     shuffled = normal_rows.copy()
     random.shuffle(shuffled)
@@ -109,7 +109,7 @@ def main():
     val_rows = shuffled[n_train : n_train + n_val]
     test_rows = shuffled[n_train + n_val :]
 
-    # 3. 格式化输出
+    # 3. Format outputs.
     def format_row(row):
         return {
             "seq_hash": row["seq_hash"],
@@ -128,7 +128,7 @@ def main():
     save_split("test", [format_row(r) for r in test_rows])
     save_split("test_extremelength", [format_row(r) for r in extreme_rows])
 
-    # 4. 统计摘要
+    # 4. Summary statistics
     def stats(rows):
         lengths = [int(r["length"]) for r in rows]
         ratios = [float(r["interface_ratio"]) for r in rows]

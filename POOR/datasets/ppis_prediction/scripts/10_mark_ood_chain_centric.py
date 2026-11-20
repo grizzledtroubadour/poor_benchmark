@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """
-为 Chain-Centric 测试集标记 OOD 属性。
+Annotate OOD properties of the chain-centric test set.
 
-使用已有的 OOD 定义和阈值：
+Use existing OOD definitions and thresholds:
 - OOD_LowHomology_30/40/.../90
 - OOD_Orphan
 - OOD_NewFold_0.3/0.4/.../0.9
 - OOD_ExtremeLength
 - OOD_IDR
 
-参考集：Chain-Centric Train + Val。
+Reference: chain-centric Train + Val.
 
-> SUPERSEDED 说明（2026-08 统一口径后）：
-> - 序列同源段（compute_homology_ood，mmseqs2 search）与结构相似段
->   （compute_newfold_ood，foldseek）已被 `.skills/homology-ood-annotation/`
->   （seq_homology_ood.py / struct_homology_ood.py，easy-search 口径）取代，
->   splits 中的现值以 skill 重算为准；本脚本这两段仅作历史任务实现保留，
->   重跑口径不可混用。
-> - 列名后经项目统一 schema 迁移改名：OOD_LowHomology_* -> seq_Redundancy_*、
+> SUPERSEDED (canonical definitions unified in 2026-08):
+> - Sequence homology (compute_homology_ood, mmseqs2 search) and structural similarity
+>   (compute_newfold_ood, foldseek) are replaced by `.skills/homology-ood-annotation/`
+>   (seq_homology_ood.py / struct_homology_ood.py with easy-search).
+>   Current split values come from the skill; these two sections are historical implementations.
+>   Do not mix their definitions during replay.
+> - Column names were subsequently migrated: OOD_LowHomology_* -> seq_Redundancy_*;
 >   OOD_NewFold_* -> TM-score_*、OOD_ExtremeLength -> OOD_ExtremeLong/Short。
-> - OOD_IDR 段保留有效：使用 DIPS-Plus 自带 flDPnn 界面残基无序比例，
->   与 ood-annotation-toolkit 的 metapredict 口径不同，未被取代。
+> - IDR remains applicable: it uses DIPS-Plus flDPnn interface-residue disorder fractions,
+>   distinct from the toolkit's metapredict definition and not superseded.
 
-输出：
+Output:
     output/chain_centric_splits/chain_centric_test_ood.csv
     output/ood_chain_centric_summary.json
 """
@@ -232,7 +232,7 @@ def load_chain_labels(seq_hash):
 
 
 def build_pair_path_map():
-    """构建 unique_id -> file_path 的映射，避免每次扫描整个 metadata。"""
+    """Map unique_id to file_path to avoid rescanning the complete metadata."""
     metadata_path = OUTPUT_DIR / "dips_plus_metadata.csv"
     mapping = {}
     with open(metadata_path) as f:
@@ -242,7 +242,7 @@ def build_pair_path_map():
 
 
 def load_pair_idr_propensities(unique_id, role, path_map=None):
-    """从原始 pair 文件加载指定链的 IDR propensities。"""
+    """Load the requested chain's IDR propensities from its original pair."""
     if not unique_id:
         return None
     file_path = path_map.get(unique_id) if path_map else None
@@ -308,7 +308,7 @@ def main():
 
     logger.info("Loaded Train: %d, Val: %d, Test: %d", len(train), len(val), len(test))
 
-    # 加载完整 metadata 以获取 source pair 信息
+    # Load complete metadata for source pair information.
     metadata = load_csv(ROOT / args.metadata)
     metadata_by_hash = {r["seq_hash"]: r for r in metadata}
 
@@ -332,7 +332,7 @@ def main():
     # 4. ExtremeLength
     extreme = compute_extreme_length(test)
 
-    # 5. 写入 CSV
+    # 5. Write CSV.
     base_fields = list(test[0].keys()) if test else []
     ood_fields = []
     for thr in HM_THRESHOLDS:
@@ -367,7 +367,7 @@ def main():
             writer.writerow(out)
     logger.info("OOD test set saved to %s", out_path)
 
-    # 6. 统计
+    # 6. Statistics
     summary = {"total_test": len(test)}
     for thr in HM_THRESHOLDS:
         col = f"OOD_LowHomology_{thr}"

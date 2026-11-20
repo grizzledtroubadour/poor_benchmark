@@ -14,17 +14,17 @@ Implemented OOD columns on test set:
 - TM-score_0.9 ~ TM-score_0.3             [superseded]
 - OOD_IDR                                 [superseded]
 
-[SUPERSEDED 说明] 本脚本为首轮（历史）一次性流水线。其中三段重计算口径已被
-skill 统一实现取代，重算时必须改用对应 skill 脚本，不得再用本脚本的内联实现：
-  - 序列同源（mmseqs2 seq_Redundancy_* + OOD_Orphan）：
+[SUPERSEDED] This is the historical first-pass pipeline. Three expensive annotation stages
+have canonical skill implementations; use those scripts instead of the inline versions:
+  - Sequence homology (mmseqs2 seq_Redundancy_* + OOD_Orphan):
     .skills/homology-ood-annotation/scripts/seq_homology_ood.py
-  - 结构同源（Foldseek TM-score_*）：
+  - Structural homology (Foldseek TM-score_*):
     .skills/homology-ood-annotation/scripts/struct_homology_ood.py
   - IDR（metapredict OOD_IDR / idr_ratio）：
     .skills/ood-annotation-toolkit/scripts/idr_ood.py
-现行仍有效的功能：加 POOD 标准列、长度 OOD（Default/OOD_Extreme*）。
-列名 schema（pdb_file/labels/file_type → struct_file/label）其后经全项目统一迁移，
-以当前 splits 表头为准（见 DATA_PROCESS.md 注意事项）。
+Still applicable: POOD standard columns and length OOD (Default/OOD_Extreme*).
+Column names (pdb_file/labels/file_type -> struct_file/label) were later migrated project-wide.
+Use current split headers as authoritative; see DATA_PROCESS.md notes.
 """
 import hashlib
 import json
@@ -66,11 +66,11 @@ def load_splits():
 def add_standard_columns(df):
     """Add POOD standard columns: unique_id, file_type, aa_seq, labels.
 
-    unique_id = AF-<uniprot>-F1-model_v6（蛋白级标识，与 struct_file 同名）。
-    kcat 为（酶, 反应物）对级数据，同一 UniProt 多底物多行；为保证 split 内
-    唯一（README 约定 "unique within a task"），对有重复的 unique_id 追加
-    反应物内容哈希后缀 -<md5(reactant_smiles)[:8]>；已验证
-    (uniprot, reactant_smiles) 组合无重复，故后缀保证唯一。
+    unique_id = AF-<uniprot>-F1-model_v6 initially identifies a protein, matching struct_file.
+    kcat has enzyme–reactant records: one UniProt can have multiple substrates/rows. To ensure
+    uniqueness within a split (the README requires IDs unique within a task), append
+    a reactant-content hash -<md5(reactant_smiles)[:8]> to duplicate protein IDs.
+    (uniprot, reactant_smiles) pairs have been checked for duplicates; the suffix ensures uniqueness.
     """
     df = df.copy()
     uid = df['uniprot'].apply(lambda u: f"AF-{u}-F1-model_v6")
@@ -79,7 +79,7 @@ def add_standard_columns(df):
         f"{u}-{hashlib.md5(smi.encode('utf-8')).hexdigest()[:8]}"
         for u, smi in zip(uid.loc[dup_mask], df.loc[dup_mask, 'reactant_smiles'])
     ]
-    assert uid.is_unique, "unique_id 加后缀后仍不唯一"
+    assert uid.is_unique, "unique_id remains non-unique after adding the suffix"
     df['unique_id'] = uid
     df['file_type'] = 'pdb'
     df['aa_seq'] = df['sequence']
@@ -388,19 +388,19 @@ def main():
         work_dir = Path(tmp)
 
         # Sequence redundancy and orphan
-        # [superseded] 重算改用 .skills/homology-ood-annotation/scripts/seq_homology_ood.py
+        # [Superseded] Recompute using .skills/homology-ood-annotation/scripts/seq_homology_ood.py.
         max_identity, best_evalue = compute_sequence_redundancy(trainval_unique, test_unique, work_dir)
         orphan_unique = compute_orphan_labels(max_identity, best_evalue, test_unique)
         seq_red_labels_unique = compute_seq_redundancy_labels(max_identity, test_unique)
 
         # Structural similarity
-        # [superseded] 重算改用 .skills/homology-ood-annotation/scripts/struct_homology_ood.py
+        # [Superseded] Recompute using .skills/homology-ood-annotation/scripts/struct_homology_ood.py.
         trainval_unique_up = dedup_by_uniprot(trainval)
         test_unique_up = dedup_by_uniprot(test)
         tm_labels_unique = compute_tm_score_labels(test_unique_up, trainval_unique_up, work_dir)
 
         # IDR
-        # [superseded] 重算改用 .skills/ood-annotation-toolkit/scripts/idr_ood.py
+        # [Superseded] Recompute using .skills/ood-annotation-toolkit/scripts/idr_ood.py.
         idr_unique = compute_idr_labels(test_unique)
 
     # Map unique labels back to full test rows
@@ -426,9 +426,9 @@ def main():
 
     test['OOD_IDR'] = map_unique_labels_to_rows(idr_unique, test_unique, test)
 
-    # Default=False（极端长度）行：除 OOD_ExtremeShort/Long 外的 OOD 列直接置 NaN
-    # （"未计算"语义，全项目统一惯例，流水线位置写入；
-    #   finalize_ood_columns.py --mode nan 仅作兜底校验）
+    # Default=False (extreme-length) rows: set non-length OOD columns to NaN.
+    # This means not computed (project-wide convention), applied in the pipeline here;
+    # finalize_ood_columns.py --mode nan is only a fallback validation step.
     nd_mask = ~test['Default']
     if nd_mask.any():
         for col in ([f'seq_Redundancy_{t}' for t in SEQ_REDUNDANCY_THRESHOLDS] +

@@ -396,10 +396,10 @@ def build_y_true(args: argparse.Namespace, metadata: pd.DataFrame, y_pred: np.nd
 
 
 def require_train_csv(args: argparse.Namespace) -> None:
-    """label_prior null 的先验必须来自训练集（参考集）。
+    """The label_prior null must obtain priors from the training (reference) set.
 
-    拒绝静默回退到测试集标签频率：那会让 null 分子分母都混入测试标签，
-    属于评估泄漏。要么传训练集，要么显式改用 zero null。
+    Never silently fall back to test-label frequencies: doing so uses test labels in both
+    numerator and denominator and leaks evaluation information. Supply training data or explicitly use the zero null.
     """
     if args.null_baseline == "label_prior" and not args.train_csv and getattr(args, "metric", None) != "spearman":
         raise ValueError(

@@ -4,21 +4,21 @@
 v2 conventions:
   - Only ONE prior: `OOD_NewEC` (EC7-holdout, set aside before splitting).
       Prior rows FULLY participate in all dependent OOD axes since
-      2026-08-27 (历史补齐脚本见 output/scripts_archive/fill_prior_ood.py；
-      旧设计为占位 False、"纯依赖型"口径).
+                  2026-08-27 (historical backfill: output/scripts_archive/fill_prior_ood.py;
+                  previously placeholder False under a purely dependent definition).
   - `OOD_SuperfamilyHoldout` is a POST-SPLIT annotation: test samples whose
       superfamily (C.A.T.H) does not appear in train/val. These are normal
       split samples and fully participate in all dependent OOD axes.
-  - ExtremeShort rows (len(aa_seq) < 60, 含先验行 — 2026-08-27 起长度属性
-      对全部行如实标注，与 Default 语义独立，同 PPI 等任务口径；旧定义为
-      非先验 & <60 aa):
+      - ExtremeShort rows (len(aa_seq) <60, including prior-held-out rows): since 2026-08-27,
+                  annotate length faithfully for all rows independently of Default, as in PPI;
+                  previously required non-prior and <60 aa:
       Default = True (they went through the normal split) and FULLY
-      participate in all dependent OOD axes (2026-08-27 起，历史补齐脚本见
-      output/scripts_archive/fill_es_ood.py；旧约定为全部留空 NaN).
-  - `InD` = all OOD flags False（旧名 Pure_ID；最终口径的并集
-      还包含 OOD_LongTail_EC_*，由
+                  participate in all dependent OOD axes since 2026-08-27; historical backfill:
+                  output/scripts_archive/fill_es_ood.py. Previously all were left NaN.
+      - InD = all OOD flags False (formerly Pure_ID). The final union also includes
+                  OOD_LongTail_EC_* and is recomputed by
       .skills/ood-annotation-toolkit/scripts/finalize_ood_columns.py --mode ind
-      在所有 OOD 列齐备后统一重算）。
+                  after all OOD columns are available.
   - All other rows: fully computed.
 
 Stages write checkpoints under output/ and are skipped on re-run:
@@ -80,17 +80,17 @@ test["is_prior"] = test["OOD_NewEC"] == True
 print(f"  prior rows (OOD_NewEC): {test['is_prior'].sum()}")
 
 # ------------------------------------------------- ExtremeShort / Default
-test["OOD_ExtremeShort"] = test["seq_len"] < SHORT_LEN  # 含先验行（2026-08-27 起）
-# Default = 经由正常划分流程产生的样本。短序列在划分前未被单独预留，
-# 与所有样本一样走 7:1:2 分层划分，因此 ES 样本同样为 Default=True
-# （与 PPI 任务约定一致）。Default=False 仅用于"划分前单独预留"的场景。
+test["OOD_ExtremeShort"] = test["seq_len"] < SHORT_LEN  # Include prior-held-out rows (since 2026-08-27).
+# Default marks samples from ordinary splitting. Short sequences were not pre-reserved;
+# they undergo the same stratified 7:1:2 split, so extreme-short samples remain Default=True,
+# as in PPI. Default=False is reserved for explicitly pre-held-out scenarios.
 test["Default"] = True
 n_es = test["OOD_ExtremeShort"].sum()
 print(f"  ExtremeShort: {n_es} ({n_es / len(test) * 100:.1f}%)")
 
 # rows that participate in dependent OOD axes
-# 2026-08-27 起全部行参与依赖型 OOD（含 ES 与 NewEC 先验行；
-# mmseqs/foldseek 查询集本覆盖全部 test）
+# Since 2026-08-27, evaluate dependent OOD for all rows, including ES and NewEC-prior rows;
+# mmseqs/foldseek queries already cover all test samples.
 test["is_dependent"] = True
 print(f"  dependent rows: {test['is_dependent'].sum()}")
 
@@ -248,15 +248,15 @@ freq = train["label"].value_counts()
 rare_topos = set(freq[freq <= LONGTAIL_FREQ].index)
 print(f"LongTail: {len(rare_topos)} rare topologies (train freq <= {LONGTAIL_FREQ})")
 lt = test["label"].isin(rare_topos)
-# 2026-08-27 起对所有行计算（含 ES）
+# Since 2026-08-27, compute for all rows including ES.
 test["OOD_LongTail"] = lt.to_numpy()
 
 
 # ----------------------------------------------------------------- InD
-# InD = 纯 ID-Test 样本：所有 OOD 标记均为 False（不参与任何 OOD 轴）。
-# 旧名 Pure_ID。注意：此处并集不含后续才加入的 OOD_LongTail_EC_* 列，
-# 最终口径由 .skills/ood-annotation-toolkit/scripts/finalize_ood_columns.py
-# --mode ind 在所有 OOD 列齐备后统一重算。
+# InD: all OOD flags False; samples belong to no OOD scenario.
+# Formerly Pure_ID. This union excludes later-added OOD_LongTail_EC_* columns;
+# the final definition is recomputed by .skills/ood-annotation-toolkit/scripts/finalize_ood_columns.py
+# --mode ind after all OOD columns are ready.
 seq_cols = [f"seq_Redundancy_{t}" for t in SEQ_THRESHOLDS]
 tm_cols = [f"TM-score_{t}" for t in TM_THRESHOLDS]
 ood_flag_cols = (seq_cols + tm_cols

@@ -1,114 +1,102 @@
 ---
 name: homology-ood-annotation
-description: 为任意任务按 POOD-Benchmark 统一口径计算搜索型同源 OOD 列：mmseqs2 序列同源（seq_Redundancy_90..30 + OOD_Orphan）与 foldseek 结构同源（TM-score_0.9..0.3）。搜索方向固定为 test→train+val，支持 m8 缓存复用与双链任务（aa_seq1/aa_seq2）。当需要为数据集补充或重算序列/结构同源性 OOD 列时使用。
+description: Compute standardized POOD-Benchmark search-based homology OOD columns for arbitrary tasks: mmseqs2 sequence homology (seq_Redundancy_90..30 + OOD_Orphan) and foldseek structural homology (TM-score_0.9..0.3). Search test→train+val, supporting m8 reuse and paired chains (aa_seq1/aa_seq2). Use to add or recompute sequence/structure homology OOD.
 ---
 
-# 搜索型同源 OOD 标注（mmseqs2 序列 + foldseek 结构）
+# Search-based homology OOD: mmseqs2 sequences and foldseek structures
 
-## 描述
+## Description
 
-本 skill 封装了 POOD-Benchmark 统一的**搜索型**同源 OOD 流程：`seq_homology_ood.py`（mmseqs2 easy-search，序列）与 `struct_homology_ood.py`（foldseek easy-search，结构）。两者均为"test 样本对 train+val 参考集搜索，取最大相似度按阈值阶梯判定"，与 `cath-ted-domain-annotation`（分类标签留一法）互补。
+Unified search-based homology workflows: seq_homology_ood.py uses mmseqs2 easy-search; struct_homology_ood.py uses foldseek easy-search. Both search test against train+val, take maximum similarity, and apply threshold ladders. Complements classification holdouts in cath-ted-domain-annotation.
 
-## 何时使用
+## When to use
 
-- 任意任务需要补充或重算 `seq_Redundancy_90` ~ `seq_Redundancy_30` 与 `OOD_Orphan`
-- 任意任务需要补充或重算 `TM-score_0.9` ~ `TM-score_0.3`
-- 已有 mmseqs2 / foldseek 的 m8 结果文件，只需重放阈值判定（复跑、阈值调整）
+- Add/recompute `seq_Redundancy_90`–`seq_Redundancy_30` and `OOD_Orphan`.
+- Add/recompute `TM-score_0.9`–`TM-score_0.3`.
+- Replay existing mmseqs2/foldseek m8 results for reruns or threshold changes.
 
-## 核心口径（各任务必须一致）
+## Canonical definitions
 
-| 决策点 | 约定 | 理由 |
+| Decision | Convention | Rationale |
 |:---|:---|:---|
-| 搜索方向 | **query = test，target = train+val** | 与 fold `annotate_test_ood.py` 一致；反向搜索会漏掉"test 有多个同源"的语义 |
-| 序列搜索 | mmseqs2 `easy-search -s 7.5 --format-output query,target,pident`（easy-search 默认 e-value ≤ 1e-3 门槛） | fold 现行实现；easy-search 显著性门槛保证 hit 均为显著同源。**-s 7（lbs）vs 7.5 的实测差异可忽略**（lbs 8,864 链两档对比：seq_Redundancy ≥50 各列零差异、seq40 Δ=3、seq30 Δ=9、Orphan Δ=18/932，仅影响 pident 22.7–42.0 的检测极限弱 hit，见 lbs `output/verify/sens_s{7,75}.m8`） |
-| 序列判定 | 每个 test 样本取 max pident（无 hit 按 0.0 计）；`seq_Redundancy_<T>` = max pident < T（T ∈ 90,80,...,30） | 阶梯阈值，步长 10% |
-| Orphan 语义 | **无任何显著 hit → `OOD_Orphan=True`** | easy-search 默认 e-value ≤ 1e-3，"无 hit" 等价于旧 lbs 修复版的 "best e-value > 1e-3"；保证 **OOD_Orphan ⊆ seq_Redundancy_30 ⊆ ... ⊆ seq_Redundancy_90**（脚本内置断言自检） |
-| 结构搜索 | foldseek `easy-search --format-output query,target,alntmscore`；query id 取文件名去路径与 `.pdb` 后缀 | fold 现行实现的归一化方式 |
-| 结构判定 | 每个 test 结构取 max alntmscore（无 hit 按 0.0 计）；`TM-score_<T>` = max alntmscore < T（T ∈ 0.9,...,0.3） | 阶梯阈值，步长 0.1 |
-| 双链任务合并 | 两条链各自搜索，样本级判定按 **any 语义**合并：`seq_Redundancy_<T>` = (A<T) \| (B<T)，`OOD_Orphan` = (A 无 hit) \| (B 无 hit)；TM-score 同理 | 与 ppi `10_recompute_all_ood.py` 的 `(A_max_id<thr)\|(B_max_id<thr)`、`(A==0)\|(B==0)` 一致（**不是取两链 max pident 再判定**——任一侧链无同源即将整个 pair 判为 OOD）；`--merge all` 可选 |
-| 自比对 | 解析 m8 时跳过 q==t 行 | 与 lbs 修复版一致；防止 test/ref 有重叠 id 时 max pident 恒 100 |
-| m8 缓存 | `--m8-cache` 已存在 → 仅重放判定（不需要外部工具）；不存在 → 搜索后写入该路径 | 搜索是重计算，判定是轻量重放 |
+| Direction | **query=test, target=train+val** | Matches fold annotate_test_ood.py; reversing loses the per-test multiple-homolog interpretation |
+| Sequence search | mmseqs2 `easy-search -s 7.5 --format-output query,target,pident`, default e-value ≤1e-3 | Matches fold; hits are significant. **-s 7 (lbs) versus 7.5 has negligible observed effect:** among 8,864 lbs chains, seq_Redundancy ≥50 unchanged, seq40 Δ=3, seq30 Δ=9, Orphan Δ=18/932. Differences concern weak pident 22.7–42.0 hits near detection limits; see lbs `output/verify/sens_s{7,75}.m8` |
+| Sequence flag | Maximum pident per test sample, no hit=0.0; `seq_Redundancy_<T>` means max pident <T, T=90,80,...,30 | 10% threshold ladder |
+| Orphan | **No significant hit →OOD_Orphan=True** | Default e-value ≤1e-3 makes no hit equivalent to repaired lbs best e-value >1e-3. Ensures **OOD_Orphan ⊆ seq_Redundancy_30 ⊆ ... ⊆ seq_Redundancy_90**, asserted internally |
+| Structure search | foldseek `easy-search --format-output query,target,alntmscore`; normalize query IDs by removing paths and `.pdb` | Matches fold normalization |
+| Structure flag | Maximum alntmscore per test structure, no hit=0.0; `TM-score_<T>` means max <T, T=0.9,...,0.3 | 0.1 threshold ladder |
+| Paired-chain merge | Search chains separately; **any semantics**: (A<T) or (B<T); Orphan means A or B has no hit; analogous for TM | Matches ppi 10_recompute_all_ood.py `(A_max_id<thr)\|(B_max_id<thr)` and `(A==0)\|(B==0)`. **Do not take the maximum across chains first**: either chain without homology makes the pair OOD. Optional `--merge all` |
+| Self-alignment | Skip q==t while parsing m8 | Matches repaired lbs; avoids fixed 100 pident for overlapping test/reference IDs |
+| Cache | Existing `--m8-cache` →replay without external tools; absent →search and save | Search is expensive; classification replay is cheap |
 
-## 数据来源（各任务历史实现与已知差异）
+## Historical implementations and differences
 
-| 任务 | 实现 | 与本 skill 口径的差异 |
+| Task | Implementation | Difference |
 |:---|:---|:---|
-| fold_classification | `scripts/05_annotate_test_ood.py`（**本 skill 基准**） | 无差异；m8 缓存 `output/ood_mmseqs_test_vs_trainval.m8` / `ood_foldseek_test_vs_trainval.m8` 可直接 `--m8-cache` 重放 |
-| ligand_binding_site | `output/scripts_archive/24_fix_seq_homology_easysearch.py`（easy-search 修复终版，已归档） | `-s 7`（非 7.5）；format-output 多一列 evalue，Orphan 用 best e-value > 1e-3 判定（与"无 hit"等价）；query 按 chain_key（`{pdb}_{chain}`）去重而非 unique_id |
-| ppi_prediction | `scripts/10_recompute_all_ood.py` | 2026-08-27 起 mmseqs2 与 foldseek 均统一为 **easy-search**（skill 脚本重算写回，缓存 `output/ood_mmseqs_test_vs_trainval_easysearch.m8`、`ood_foldseek_test_vs_trainval_easysearch.m8`，均可 `--m8-cache` 重放）；此前 mmseqs 为旧式 `search --max-seqs 10 -e 100 -c 0.0`（seq30 515→3,653、Orphan 211→3,017），foldseek 为 `search -a -e inf` 保留全部 hit（旧 max_tmscore 分布在 [0.3,0.4) 出现 0 条的断层伪影、TM-score_0.3 与 0.4 两列退化相等，重算后 0.9: 4,827→8,172、0.3: 1,610→943）；旧缓存仅供溯源。双链 any 合并即本 skill 默认 |
-| func_prediction | `scripts/orphan_mark.py`（**已归档**，现行口径见任务 DATA_PROCESS.md §4.3 easy-search -s 7） | 历史参考集是 UniRef50 而非 train+val，且 Orphan 还要求 fident ≥ 0.30——语义不同，不可用本 skill 重放其旧 OOD_Orphan |
-| lbs 旧流程 | `scripts/11_build_ood_splits.py`（搜索调用已同步为 easy-search -s 7） | 旧式 `mmseqs search -e 100 -c 0.0` 弱比对顶满 max pident，曾导致 Orphan(1,285) ≫ SeqID<30%(134) 倒挂；由 24_fix（已归档）修复 |
+| fold_classification | `scripts/05_annotate_test_ood.py`, **baseline** | None; replay `output/ood_mmseqs_test_vs_trainval.m8` / `ood_foldseek_test_vs_trainval.m8` directly |
+| ligand_binding_site | Archived `output/scripts_archive/24_fix_seq_homology_easysearch.py` | Uses -s 7, adds evalue output, Orphan best e-value >1e-3 (equivalent to no hit); deduplicates queries by chain_key `{pdb}_{chain}`, not unique_id |
+| ppi_prediction | `scripts/10_recompute_all_ood.py` | Both tools unified to **easy-search** on 2026-08-27 using skill scripts. Replay caches `output/ood_mmseqs_test_vs_trainval_easysearch.m8`, `ood_foldseek_test_vs_trainval_easysearch.m8`. Earlier mmseqs used `search --max-seqs 10 -e 100 -c 0.0` (seq30 515→3,653; Orphan 211→3,017). Earlier foldseek used `search -a -e inf`; a gap with no max_tmscore in [0.3,0.4) made TM0.3 and TM0.4 identical. After recomputation: TM0.9 4,827→8,172; TM0.3 1,610→943. Old caches are provenance only. Paired-chain any merge is the default here |
+| func_prediction | Archived `scripts/orphan_mark.py`; current easy-search -s 7 in task DATA_PROCESS.md §4.3 | Historical reference was UniRef50, not train+val; Orphan also required fident ≥0.30. Different semantics: do not replay old OOD_Orphan with this tool |
+| Legacy lbs | `scripts/11_build_ood_splits.py`, now easy-search -s 7 | Earlier `mmseqs search -e 100 -c 0.0` weak alignments inflated maximum pident, yielding Orphan 1,285 ≫ SeqID<30% 134. Fixed by archived 24_fix |
 
-> 重算既有任务时优先沿用该任务的 m8 缓存重放；重新搜索则用本 skill 默认参数，并在 DATA_PROCESS.md 注明与历史实现的参数差异。
+> Prefer task m8-cache replay when recomputing existing tasks. New searches use this skill's defaults; document parameter differences from historical implementations in DATA_PROCESS.md.
 
-## 用法
+## Usage
 
-### 1. 序列同源（seq_homology_ood.py）
+### 1. Sequence homology
 
 ```bash
-# 单链任务（fold 口径）
+# Single-chain task: fold definition.
 python .skills/homology-ood-annotation/scripts/seq_homology_ood.py \
     --test cath_test.csv --ref cath_train.csv cath_val.csv \
     --out test_flagged.csv --m8-cache output/ood_mmseqs_test_vs_trainval.m8 \
     --threads 16
 
-# 双链任务（ppi 口径，any 合并）
+# Paired-chain task: ppi any merge.
 python .skills/homology-ood-annotation/scripts/seq_homology_ood.py \
     --test ppi_test.csv --ref ppi_train.csv ppi_val.csv \
     --seq-col aa_seq1,aa_seq2 --out ppi_flagged.csv --threads 16
 
-# 仅重放已有 m8（不需要 mmseqs2；注意 m8 query 键需与 unique_id 对应）
+# Replay without mmseqs2; m8 query keys must match unique_id.
 python .skills/homology-ood-annotation/scripts/seq_homology_ood.py \
     --test cath_test.csv --ref cath_train.csv \
     --out replay.csv --m8-cache existing.m8
 ```
 
-输出 = test 全行 + `max_pident`（双链为 `max_pident_<seq-col>` 每链一列）
-+ 7 个 `seq_Redundancy_*`（True/False 字符串）+ `OOD_Orphan`。
+Output retains all test rows and adds max_pident (paired: one `max_pident_<seq-col>` per chain), seven True/False-string seq_Redundancy flags, and OOD_Orphan.
 
-关键参数：`--seq-col`（默认 `aa_seq`）、`--thresholds`（默认 `90,80,70,60,50,40,30`）、
-`--merge {any,all}`、`--sensitivity`（默认 7.5）、`--id-col`、`--tmp-dir`。
+Options: `--seq-col` (aa_seq), `--thresholds` (90,80,70,60,50,40,30), `--merge {any,all}`, `--sensitivity` (7.5), `--id-col`, `--tmp-dir`.
 
-### 2. 结构同源（struct_homology_ood.py）
+### 2. Structural homology
 
 ```bash
-# 目录模式（取目录下全部 *.pdb/*.cif）
+# Directory mode: all *.pdb/*.cif.
 python .skills/homology-ood-annotation/scripts/struct_homology_ood.py \
     --test-structs test_pdbs/ --ref-structs trainval_pdbs/ \
     --out tm_flags.csv --m8-cache output/ood_foldseek_test_vs_trainval.m8
 
-# 清单模式（每行一个结构文件路径）
+# Manifest mode: one structure path per line.
 python .skills/homology-ood-annotation/scripts/struct_homology_ood.py \
     --test-structs test_pdbs.txt --ref-structs trainval_pdbs.txt --out tm_flags.csv
 ```
 
-输出 = 每个 test 结构一行：`query_id, max_alntmscore, TM-score_0.9 ... TM-score_0.3`。
+One output row per test structure: `query_id, max_alntmscore, TM-score_0.9 ... TM-score_0.3`.
 
-### 3. 写回 splits（调用方职责）
+### 3. Write splits: caller responsibility
 
-与 ec skill 相同：先备份、整表 `dtype=str, keep_default_na=False` 读入、仅覆写目标列、
-Default=False 行按任务惯例置 NaN（可用 `ood-annotation-toolkit` 的
-`finalize_ood_columns.py --mode nan` 统一处理）、写回后逐单元格 diff 验证。
+As in the EC skill: back up, read all columns with dtype=str/keep_default_na=False, overwrite target columns only, and mask Default=False by task convention (toolkit finalizer --mode nan). Diff all cells after writing.
 
-## 验证要求
+## Validation
 
-- 脚本内置断言：`OOD_Orphan ⊆ seq_Redundancy_30 ⊆ ... ⊆ seq_Redundancy_90` 阶梯单调性；
-  TM-score 列同理（破坏即报错退出）
-- 回归基准（fold，12,911 行 test，`--m8-cache` 重放，2026-08-27 实测）：与
-  `splits/cath_test.csv` 的 7 个 seq_Redundancy 列 + OOD_Orphan、7 个 TM-score 列逐行一致
-- 新任务抽查 ≥5 条 OOD_Orphan=True 样本：确认其序列/结构对 train+val 确无显著 hit
-- 有 hit query 数应与 m8 行数同量级；异常偏少时先检查 query 键是否匹配（双链缓存的
-  键为 `unique_id|<seq-col>`，历史任务缓存键可能是 protein_id / chain_key，不可混用）
+- Internal monotonicity assertions: Orphan ⊆ seq30 ⊆ ... ⊆ seq90, and analogous TM columns; violations fail immediately.
+- Fold regression baseline: 12,911 test rows, m8 replay measured 2026-08-27, agrees row by row with all seven seq flags +Orphan and seven TM columns in splits/cath_test.csv.
+- For new tasks inspect ≥5 Orphan=True samples, confirming no significant sequence/structure hits against train+val.
+- Number of queries with hits should be comparable in order of magnitude to m8 row count. If anomalously low, check key matching: paired keys use `unique_id|<seq-col>`; historical protein_id/chain_key caches are not interchangeable.
 
-## 注意事项
+## Cautions
 
-1. **缓存键兼容**：本 skill 自产 m8 的 query 键 = `unique_id`（双链为 `unique_id|<seq-col>`）；
-   fold 的缓存键同为 unique_id 可直接重放；ppi（protein_id）/ lbs（chain_key）的历史
-   缓存键不同，重放前需确认键空间一致，否则全部判为 Orphan
-2. **阈值列名**：`--thresholds` 写入列名时去掉尾零（90→`seq_Redundancy_90`，
-   0.9→`TM-score_0.9`），自定义阈值注意与既有列名对齐
-3. foldseek 需要结构文件目录，脚本用符号链接组建 query/target 目录（fold 同款做法，
-   避免拷贝 ~10 GB）；`--tmp-dir` 指向的目录会保留 fasta/m8 等中间产物
-4. mmseqs2 / foldseek 不在 PATH 时给出明确报错并提示改用 `--m8-cache` 重放
-5. Default=False（极端长度）行的 NaN 惯例不在本 skill 处理——本 skill 输出全行计算值，
-   NaN 化由 `ood-annotation-toolkit/finalize_ood_columns.py` 统一执行
+1. **Cache keys:** generated query keys are unique_id, or `unique_id|<seq-col>` for paired chains. Fold caches match directly; historical ppi protein_id and lbs chain_key differ. Verify key spaces before replay or all queries may become Orphan.
+2. **Threshold names:** remove trailing zeros in columns: 90→seq_Redundancy_90; 0.9→TM-score_0.9. Align custom thresholds with existing names.
+3. foldseek requires directories; symlink structures as in fold to avoid ~10 GB copying. `--tmp-dir` retains intermediate FASTA/m8 files.
+4. Missing mmseqs2/foldseek on PATH yields explicit errors suggesting m8 replay.
+5. This skill computes all rows rather than masking Default=False extreme-length rows. Toolkit finalize_ood_columns.py applies the NaN convention.

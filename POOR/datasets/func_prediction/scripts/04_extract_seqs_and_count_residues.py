@@ -2,7 +2,7 @@
 Extract amino acid sequences from PDB/CIF files and count actual residues.
 Filter out chains with < 60 residues.
 
-从任务根目录（datasets/func_prediction/）运行；产物写入 output/。
+Run from the task root (datasets/func_prediction/); write outputs to output/.
 """
 import os
 import sys
@@ -47,7 +47,7 @@ def extract_from_pdb(filepath):
                     residues[key] = res_name
     except Exception as e:
         return None, str(e)
-    
+
     seq = ''.join(AA_MAP.get(r, '') for r in residues.values())
     return {'count': len(residues), 'seq': seq, 'seq_len': len(seq)}
 
@@ -56,18 +56,18 @@ def extract_from_cif(filepath):
     """Extract sequence and count residues from a mmCIF file."""
     residues = OrderedDict()
     in_atom_site = False
-    
+
     # Column indices
     group_col = None
     comp_col = None
     seq_col = None
     icode_col = None
-    
+
     try:
         with open(filepath, 'r') as f:
             for line in f:
                 line = line.rstrip('\n')
-                
+
                 if line.startswith('_atom_site.'):
                     in_atom_site = True
                     if 'group_PDB' in line:
@@ -79,7 +79,7 @@ def extract_from_cif(filepath):
                     elif 'pdbx_PDB_ins_code' in line:
                         icode_col = len([l for l in line[:line.index('pdbx_PDB_ins_code')].split() if l.startswith('_atom_site.')])
                     continue
-                
+
                 if not in_atom_site:
                     continue
                 if line.startswith('#') or line.startswith('loop_'):
@@ -87,16 +87,16 @@ def extract_from_cif(filepath):
                     continue
                 if not line.strip() or line.startswith('_'):
                     continue
-                
+
                 parts = line.split()
                 if len(parts) < 5:
                     continue
-                
+
                 # Simple heuristic: look for ATOM/HETATM in first few columns
                 record_type = parts[0] if parts[0] in ('ATOM', 'HETATM') else None
                 if not record_type:
                     continue
-                
+
                 # Find res_name - it's typically around column 5 in mmCIF
                 # Use a simpler approach: look for standard amino acid names
                 res_name = None
@@ -104,20 +104,20 @@ def extract_from_cif(filepath):
                     if p.upper() in AA_MAP:
                         res_name = p.upper()
                         break
-                
+
                 if not res_name:
                     continue
-                
+
                 # Find sequence id - usually a numeric or mixed field
                 seq_id = None
                 for p in parts[2:10]:
                     if p.replace('-', '').replace('?', '').isdigit() or (p.startswith('-') and p[1:].isdigit()):
                         seq_id = p
                         break
-                
+
                 if not seq_id:
                     continue
-                
+
                 # Find insertion code - usually after seq_id
                 icode = ''
                 for i, p in enumerate(parts):
@@ -126,14 +126,14 @@ def extract_from_cif(filepath):
                         if len(next_p) == 1 and next_p.isalpha():
                             icode = next_p
                             break
-                
+
                 key = (seq_id, icode)
                 if key not in residues:
                     residues[key] = res_name
-                    
+
     except Exception as e:
         return None, str(e)
-    
+
     seq = ''.join(AA_MAP.get(r, '') for r in residues.values())
     return {'count': len(residues), 'seq': seq, 'seq_len': len(seq)}
 
@@ -142,17 +142,17 @@ def process_file(filename):
     """Process a single PDB/CIF file."""
     filepath = os.path.join(PDB_DIR, filename)
     chain_key = filename.replace('.pdb', '').replace('.cif', '')
-    
+
     if filename.endswith('.pdb'):
         result = extract_from_pdb(filepath)
     elif filename.endswith('.cif'):
         result = extract_from_cif(filepath)
     else:
         return None
-    
+
     if result is None or isinstance(result, tuple):
         return {'chain_key': chain_key, 'error': result[1] if isinstance(result, tuple) else 'unknown'}
-    
+
     result['chain_key'] = chain_key
     result['filename'] = filename
     return result
@@ -161,10 +161,10 @@ def process_file(filename):
 def main():
     files = [f for f in os.listdir(PDB_DIR) if f.endswith(('.pdb', '.cif'))]
     print(f"Total files: {len(files)}")
-    
+
     results = []
     errors = []
-    
+
     with ProcessPoolExecutor(max_workers=32) as executor:
         futures = {executor.submit(process_file, f): f for f in files}
         for i, future in enumerate(as_completed(futures)):
@@ -177,41 +177,41 @@ def main():
                 errors.append(result)
             else:
                 results.append(result)
-    
+
     print(f"\nSuccessful: {len(results)}, Errors: {len(errors)}")
     if errors:
         print(f"First 5 errors: {errors[:5]}")
-    
+
     # Count residues and filter
     counts = {}
     filtered_seqs = []
     short_chains = []
-    
+
     for r in results:
         ck = r['chain_key']
         count = r['count']
         seq = r['seq']
         counts[ck] = {'count': count, 'seq_len': len(seq), 'filename': r['filename']}
-        
+
         if count >= MIN_RESIDUES and len(seq) >= MIN_RESIDUES:
             filtered_seqs.append((ck, seq))
         else:
             short_chains.append((ck, count, len(seq)))
-    
+
     print(f"\nChains with >= {MIN_RESIDUES} residues: {len(filtered_seqs)}")
     print(f"Chains with < {MIN_RESIDUES} residues: {len(short_chains)}")
-    
+
     # Save counts
     with open(OUTPUT_JSON, 'w') as f:
         json.dump(counts, f, indent=2)
-    
+
     # Save filtered sequences
     with open(OUTPUT_FASTA, 'w') as f:
         for ck, seq in filtered_seqs:
             f.write(f">{ck}\n{seq}\n")
-    
+
     print(f"\nSaved to {OUTPUT_FASTA} and {OUTPUT_JSON}")
-    
+
     # Show short chain stats
     if short_chains:
         counts_only = [c for _, c, _ in short_chains]

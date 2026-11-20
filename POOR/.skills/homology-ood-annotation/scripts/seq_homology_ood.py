@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""序列同源 OOD 计算（homology-ood-annotation skill 第 1 步）。
+"""Sequence-homology OOD computation (homology-ood-annotation step 1).
 
-统一口径（以 fold_classification/scripts/annotate_test_ood.py 为基准）：
-- 搜索方向：query = test 序列，target = train+val 序列
-- 工具：mmseqs2 `easy-search -s 7.5`（默认 e-value <= 1e-3 门槛，
-  lbs 修复版用 -s 7，差异见 SKILL.md 历史实现表）
-- 判定：每个 test 样本取对 ref 的 max pident；无 hit 按 0.0 计
-  seq_Redundancy_<T> = (max pident < T)；OOD_Orphan = 无任何 hit
-  → 保证 OOD_Orphan ⊆ seq_Redundancy_30 ⊆ ... ⊆ seq_Redundancy_90
-- 多序列列任务（如 ppi 的 aa_seq1/aa_seq2）：每条链各自搜索，
-  样本级判定默认按 any 语义合并（任一链满足即 True，与 ppi
-  10_recompute_all_ood.py 的 (A<thr)|(B<thr)、(A==0)|(B==0) 一致）
+Canonical definition, based on fold_classification/scripts/annotate_test_ood.py:
+- Search: query=test sequences, target=train+val sequences.
+- Tool: mmseqs2 `easy-search -s 7.5` (default e-value <=1e-3).
+  The repaired lbs implementation uses -s 7; see the historical table in SKILL.md.
+- Per test sample, take maximum reference pident; no hit means 0.0.
+  seq_Redundancy_<T> = max pident <T; OOD_Orphan means no hit.
+  This ensures OOD_Orphan ⊆ seq_Redundancy_30 ⊆ ... ⊆ seq_Redundancy_90.
+- For multiple sequence columns, e.g. ppi aa_seq1/aa_seq2, search each chain separately.
+  Merge sample flags with any semantics by default: True if either chain qualifies, matching
+  ppi 10_recompute_all_ood.py (A<thr)|(B<thr) and (A==0)|(B==0).
 
-m8 缓存：--m8-cache 指向的 m8 已存在时仅重放判定（无需 mmseqs2）；
-不存在时运行 mmseqs2 并把 m8 写到该路径供下次复用。
-m8 格式固定为 `query,target,pident` 三列（query 名 = unique_id；
-多列模式为 `unique_id|<seq-col>`，自行生产的缓存才能复用）。
+m8 cache: if --m8-cache exists, replay flags without mmseqs2;
+otherwise run mmseqs2 and write the m8 there for reuse.
+m8 has three columns query,target,pident, with query=unique_id;
+multiple-column keys use unique_id|<seq-col>. Only compatible generated caches can be reused.
 
-用法：
-    # 单链任务（fold 口径）
+Usage:
+    # Single-chain task: fold definition.
     python seq_homology_ood.py --test cath_test.csv \
         --ref cath_train.csv cath_val.csv --out test_flagged.csv \
         --m8-cache ood_mmseqs_test_vs_trainval.m8
-    # 双链任务（ppi 口径）
+    # Paired-chain task: ppi definition.
     python seq_homology_ood.py --test ppi_test.csv \
         --ref ppi_train.csv ppi_val.csv --seq-col aa_seq1,aa_seq2 \
         --out ppi_flagged.csv
-    # 仅重放已有 m8（不需要 mmseqs2）
+    # Replay existing m8 without mmseqs2.
     python seq_homology_ood.py --test cath_test.csv --ref cath_train.csv \
         --out replay.csv --m8-cache existing.m8
 """
@@ -45,29 +45,29 @@ DEFAULT_THRESHOLDS = "90,80,70,60,50,40,30"
 def parse_args():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--test", required=True, type=Path, help="test csv（含序列列）")
+    ap.add_argument("--test", required=True, type=Path, help="Test CSV containing sequence columns")
     ap.add_argument("--ref", required=True, type=Path, nargs="+",
-                    help="参考集 csv（train、val，可多个，取并集）")
+                    help="Reference CSVs (train/val); combine multiple files by union")
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--seq-col", default="aa_seq",
-                    help="序列列，逗号分隔多列（双链任务如 aa_seq1,aa_seq2）")
+                    help="Comma-separated sequence columns, e.g. aa_seq1,aa_seq2 for paired chains")
     ap.add_argument("--id-col", default="unique_id")
     ap.add_argument("--thresholds", default=DEFAULT_THRESHOLDS,
-                    help="逗号分隔的 pident 阈值（max pident < 阈值 → True）")
+                    help="Comma-separated pident thresholds: maximum pident < threshold means True")
     ap.add_argument("--merge", choices=["any", "all"], default="any",
-                    help="多序列列任务的样本级合并语义（any=任一链满足，ppi 口径）")
+                    help="Sample-level merge for multiple chains: any means either chain qualifies, as in ppi")
     ap.add_argument("--sensitivity", default="7.5",
-                    help="mmseqs2 easy-search -s 参数（fold 用 7.5，lbs 修复版用 7）")
+                    help="mmseqs2 easy-search sensitivity: fold uses 7.5, repaired lbs uses 7")
     ap.add_argument("--m8-cache", type=Path, default=None,
-                    help="m8 缓存路径：存在则仅重放；不存在则搜索后写入复用")
+                    help="m8 cache: replay if present; otherwise search and save for reuse")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--tmp-dir", type=Path, default=None,
-                    help="临时目录（fasta、mmseqs tmp）；默认自动创建并清理")
+                    help="Temporary FASTA/mmseqs directory; created and cleaned automatically by default")
     ap.add_argument("--default-col", default="Default",
-                    help="Default 列名；存在时 Default=False 行的结果列按 --nondefault 处理")
+                    help="Default column; process Default=False output rows according to --nondefault")
     ap.add_argument("--nondefault", choices=["nan", "false"], default="nan",
-                    help="Default=False 行的取值（nan=全项目统一惯例，流水线位置直接写入；"
-                         "false=旧惯例，仅为兼容保留）")
+                    help="Default=False values: nan follows the project-wide generation-time convention; "
+                         "false is retained only for legacy compatibility")
     return ap.parse_args()
 
 
@@ -80,7 +80,7 @@ def query_key(uid, col, multi):
 
 
 def collect_records(df, seq_cols, id_col, multi):
-    """去重收集 (key, seq)；同 key 取首条。"""
+    """Collect deduplicated (key, seq) records; keep the first per key."""
     records = {}
     cols = [id_col] + seq_cols
     for row in df[cols].itertuples(index=False):
@@ -102,8 +102,8 @@ def write_fasta(records, path):
 
 def run_mmseqs(q_fa, t_fa, m8_path, tmp_dir, sensitivity, threads):
     if shutil.which("mmseqs") is None:
-        sys.exit("错误：未在 PATH 找到 mmseqs（mmseqs2）。请安装 mmseqs2 后重试，"
-                 "或用 --m8-cache 指向已有 m8 仅重放判定（重放模式不需要 mmseqs2）。")
+        sys.exit("Error: mmseqs (mmseqs2) not found on PATH. Install it and retry, "
+                 "or use --m8-cache to replay an existing m8 without mmseqs2.")
     cmd = ["mmseqs", "easy-search", str(q_fa), str(t_fa), str(m8_path),
            str(tmp_dir / "mmseqs_tmp"), "-s", str(sensitivity),
            "--format-output", "query,target,pident",
@@ -113,7 +113,7 @@ def run_mmseqs(q_fa, t_fa, m8_path, tmp_dir, sensitivity, threads):
 
 
 def parse_m8_max_pident(m8_path):
-    """每个 query 的 max pident；跳过 q==t 自比对（与 lbs 修复版一致）。"""
+    """Maximum pident per query; skip q==t self-alignments, as in repaired lbs."""
     max_pident = {}
     with open(m8_path) as f:
         for line in f:
@@ -143,16 +143,16 @@ def main():
     for col in seq_cols:
         for name, df in (("test", test), ("ref", refs)):
             if col not in df.columns:
-                sys.exit(f"错误：{name} 缺少序列列 {col!r}（现有列：{list(df.columns)}）")
+                sys.exit(f"Error: {name} lacks sequence column {col!r}; available: {list(df.columns)}.")
     if args.id_col not in test.columns:
-        sys.exit(f"错误：test 缺少 id 列 {args.id_col!r}")
-    print(f"test={len(test)}, ref={len(refs)} ({len(args.ref)} 个文件)")
+        sys.exit(f"Error: test lacks ID column {args.id_col!r}")
+    print(f"test={len(test)}, ref={len(refs)} ({len(args.ref)} files)")
 
     tmp_ctx = None
     replay = args.m8_cache is not None and args.m8_cache.exists()
     if replay:
         m8_path = args.m8_cache
-        print(f"重放已有 m8：{m8_path}（不调用 mmseqs2）")
+        print(f"Replaying existing m8: {m8_path} (without mmseqs2)")
     else:
         tmp_ctx = (tempfile.TemporaryDirectory(prefix="seq_homology_")
                    if args.tmp_dir is None else None)
@@ -160,7 +160,7 @@ def main():
         tmp_dir.mkdir(parents=True, exist_ok=True)
         q_fa, t_fa = tmp_dir / "query.fasta", tmp_dir / "target.fasta"
         q_records = collect_records(test, seq_cols, args.id_col, multi)
-        # target 只需按序列去重（键名不参与判定）
+        # Deduplicate targets by sequence only; keys do not affect classification.
         t_records = {}
         seen_seqs = set()
         for row in refs[seq_cols].itertuples(index=False):
@@ -170,16 +170,16 @@ def main():
                     t_records[f"t{len(t_records)}"] = seq
         write_fasta(q_records, q_fa)
         write_fasta(t_records, t_fa)
-        print(f"query 去重序列：{len(q_records)}，target 去重序列：{len(t_records)}")
+        print(f"Unique query sequences: {len(q_records)}; unique target sequences: {len(t_records)}")
         m8_path = args.m8_cache or (tmp_dir / "result.m8")
         m8_path.parent.mkdir(parents=True, exist_ok=True)
         run_mmseqs(q_fa, t_fa, m8_path, tmp_dir, args.sensitivity, args.threads)
 
     max_pident = parse_m8_max_pident(m8_path)
     hit_keys = set(max_pident)
-    print(f"有 hit 的 query：{len(hit_keys)}")
+    print(f"Queries with hits: {len(hit_keys)}")
 
-    # 每链 max pident（无 hit → 0.0）与 per-chain 判定
+    # Per-chain maximum pident (0.0 without a hit) and flags.
     chain_cols = []
     for col in seq_cols:
         mp_col = "max_pident" if not multi else f"max_pident_{col}"
@@ -200,30 +200,30 @@ def main():
     test["OOD_Orphan"] = merge([~has_hit for _, _, has_hit in chain_cols])
     test["OOD_Orphan"] = test["OOD_Orphan"].map({True: "True", False: "False"})
 
-    # 阶梯单调性与子集关系自检
+    # Check threshold monotonicity and subset relations.
     flags = {label: test[f"seq_Redundancy_{label}"] == "True" for label in thr_labels}
     asc = sorted(zip(thresholds, thr_labels))
     for (_, lo), (_, hi) in zip(asc, asc[1:]):
-        assert bool((flags[lo] <= flags[hi]).all()), f"阶梯单调性破坏: {lo} vs {hi}"
+        assert bool((flags[lo] <= flags[hi]).all()), f"Threshold monotonicity violated: {lo} vs {hi}"
     lowest = asc[0][1]
     orphan = test["OOD_Orphan"] == "True"
-    assert bool((orphan <= flags[lowest]).all()), "OOD_Orphan 不是最低阈值列的子集！"
-    print("子集关系验证通过："
+    assert bool((orphan <= flags[lowest]).all()), "OOD_Orphan is not a subset of the lowest-threshold column!"
+    print("Subset relations verified: "
           f"OOD_Orphan ⊆ {' ⊆ '.join(f'seq_Redundancy_{l}' for _, l in asc)}")
 
-    # Default=False（极端长度预挑出）行：结果列直接置 NaN（"未计算"语义，
-    # 全项目统一惯例，流水线位置写入；finalize_ood_columns.py --mode nan 仅作兜底校验）
+    # Default=False extreme-length rows: output columns receive NaN (not computed)
+    # directly by project convention; finalize_ood_columns.py --mode nan is fallback validation.
     result_cols = [f"seq_Redundancy_{label}" for label in thr_labels] + ["OOD_Orphan"]
     if args.default_col in test.columns:
         nd = test[args.default_col] != "True"
         if nd.any():
             fill = "" if args.nondefault == "nan" else "False"
             test.loc[nd, result_cols] = fill
-            print(f"Default=False {int(nd.sum())} 行结果列置 {'NaN' if fill == '' else 'False'}")
+            print(f"Default=False: {int(nd.sum())} rows set to {'NaN' if fill == '' else 'False'}")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     test.to_csv(args.out, index=False, lineterminator="\n")
-    print(f"-> {args.out}（{len(test)} 行）")
+    print(f"-> {args.out} ({len(test)} rows)")
     for label in thr_labels:
         print(f"  seq_Redundancy_{label}: {int(flags[label].sum())}")
     print(f"  OOD_Orphan: {int(orphan.sum())}")

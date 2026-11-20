@@ -1,36 +1,36 @@
 #!/usr/bin/env python3
 """
-生成 PPIS 最终数据划分文件。
+Generate final PPIS split files.
 
-输出三个文件到 datasets/ppis_prediction/splits/：
+Write three files under datasets/ppis_prediction/splits/:
 - ppis_train.csv
 - ppis_val.csv
-- ppis_test.csv（含 OOD 标记）
+- ppis_test.csv (with OOD annotations)
 
-每行包含 4 个核心字段：
-- unique_id: 序列 MD5 哈希，对应 PDB 文件 {unique_id}.pdb
-- aa_seq: 从 PDB 文件中提取的氨基酸序列
-- file_type: 文件类型，固定为 "pdb"
-- labels: 逐残基界面标签列表（JSON 字符串），与 aa_seq 严格等长
+Each row contains four core fields:
+- unique_id: sequence MD5 hash corresponding to {unique_id}.pdb
+- aa_seq: amino-acid sequence extracted from the PDB
+- file_type: always "pdb"
+- labels: JSON residue-interface label list, exactly matching aa_seq length
 
-测试集额外附加 OOD 列，布局如下：
-- Default: 非 ExtremeLength 样本（长度在 [60, 1000]）
+Additional test OOD columns:
+- Default: non-extreme-length samples (length in [60, 1000])
 - OOD_LowHomology_90/80/.../30
 - OOD_Orphan
 - OOD_NewFold_0.9/0.8/.../0.3
 - OOD_IDR
-- OOD_CATH_FoldHoldout: CATH Topology (C.A.T) 未在 train 出现
-- OOD_CATH_SuperfamilyHoldout: CATH Homologous Superfamily (C.A.T.H) 未在 train 出现
-- OOD_NewFunction: 所有 EC 编号均未在 train/val 出现
-- OOD_LongTail: 界面正样本比例低于阈值（默认 5%）
-- ExtremeLong: 长度 > 1000
-- ExtremeShort: 长度 < 60
+- OOD_CATH_FoldHoldout: CATH topology (C.A.T) absent from training
+- OOD_CATH_SuperfamilyHoldout: CATH homologous superfamily (C.A.T.H) absent from training
+- OOD_NewFunction: all EC numbers absent from train/val
+- OOD_LongTail: interface-positive fraction below the threshold (default 5%)
+- ExtremeLong: length >1000
+- ExtremeShort: length <60
 
-除 ExtremeLong/ExtremeShort 外的所有 OOD 列均只对 Default 样本计算；
-极端长度（Default=False）样本的上述 OOD 列直接写 NaN（空字符串，
-"未计算"语义，全项目统一惯例），finalize_ood_columns.py --mode nan 仅作兜底校验。
+Compute all OOD columns except ExtremeLong/ExtremeShort only for Default samples.
+For Default=False extreme-length samples, write those OOD columns as NaN (empty strings),
+meaning not computed by project convention; finalize_ood_columns.py --mode nan only validates.
 
-当 PDB 序列长度与原始 labels 长度不一致时，使用全局序列对齐将 labels 映射到 PDB 序列。
+If PDB and original label lengths differ, globally align sequences to map labels onto the PDB.
 """
 
 import argparse
@@ -64,7 +64,7 @@ RESIDUE_3TO1 = {
     "SER": "S", "THR": "T", "VAL": "V", "TRP": "W", "TYR": "Y",
 }
 
-# 测试集 OOD 列顺序：Default + 常规 OOD + CATH OOD + Function OOD + ExtremeLong/ExtremeShort
+# Test column order: Default + regular OOD + CATH OOD + function OOD + extreme lengths.
 OOD_COLUMNS = [
     "Default",
     "OOD_LowHomology_90", "OOD_LowHomology_80", "OOD_LowHomology_70",
@@ -78,7 +78,7 @@ OOD_COLUMNS = [
     "ExtremeLong", "ExtremeShort",
 ]
 
-# CATH / EC 文件路径（项目根 = POOR/）
+# CATH / EC paths (project root = POOR/).
 CATH_DOMAIN_LIST = (
     Path(__file__).resolve().parents[3]
     / "data/CATHv44/cath-classification-data/cath-domain-list.txt"
@@ -88,7 +88,7 @@ EC_TSV_PATH = (
     / "data/sifts/sifts_chain_ec.tsv.gz"
 )
 
-# 全局对齐器：metadata 序列作为 target，pdb 序列作为 query
+# Global aligner: metadata sequence is target; PDB sequence is query.
 ALIGNER = PairwiseAligner()
 ALIGNER.mode = "global"
 ALIGNER.match_score = 2
@@ -121,7 +121,7 @@ def load_cath_domain_list(path):
 
 
 def get_source_chain_from_metadata(seq_hash, pair_meta, metadata_by_hash):
-    """根据 chain metadata 还原来源 PDB ID 与 chain ID。"""
+    """Recover source PDB and chain IDs from chain metadata."""
     m = metadata_by_hash.get(seq_hash, {})
     uid = m.get("structure_source_unique_id", "")
     role_info = m.get("structure_source_role", "")
@@ -214,7 +214,7 @@ def compute_longtail(labels, threshold=0.05):
 
 
 def extract_sequence_from_pdb(pdb_path):
-    """从 PDB 文件中提取氨基酸序列。"""
+    """Extract amino-acid sequence from a PDB."""
     seen = set()
     seq = []
     with open(pdb_path) as f:
@@ -246,11 +246,11 @@ def load_labels(label_path):
 
 def align_labels_to_pdb(metadata_seq, labels, pdb_seq, min_identity=0.85):
     """
-    使用全局序列对齐将基于 metadata 序列的 labels 映射到 PDB 序列。
+    Globally align metadata-derived labels onto the PDB sequence.
 
-    返回：
-        aligned_labels: 长度等于 len(pdb_seq) 的列表
-        identity: 对齐 identity
+    Return:
+                            aligned_labels: a list of length len(pdb_seq)
+                            identity: alignment identity
     """
     if not metadata_seq or not pdb_seq:
         return None, 0.0
@@ -269,20 +269,20 @@ def align_labels_to_pdb(metadata_seq, labels, pdb_seq, min_identity=0.85):
     if identity < min_identity and not (identity >= 0.75 and coverage >= 0.75):
         return None, identity
 
-    # 将 labels 映射到 pdb 序列位置
+    # Map labels to PDB sequence positions.
     pdb_labels = []
     label_idx = 0
     for a, b in zip(aligned_meta, aligned_pdb):
         if b == "-":
-            # PDB 中缺失，跳过 metadata 的 label
+            # Missing in PDB: skip the metadata label.
             if a != "-":
                 label_idx += 1
             continue
         if a == "-":
-            # PDB 中插入，设为 -1 表示标注缺失
+            # Inserted in PDB: use -1 for missing annotation.
             pdb_labels.append(-1)
         else:
-            # 对齐位置，传递 label
+            # Aligned position: transfer the label.
             if label_idx < len(labels):
                 pdb_labels.append(int(labels[label_idx]))
             else:
@@ -336,11 +336,11 @@ def build_rows(
         meta_seq = meta.get("sequence", "")
 
         if len(aa_seq) == len(labels) and len(aa_seq) == len(meta_seq):
-            # 完全一致
+            # Exact match
             final_labels = labels
             direct += 1
         else:
-            # 尝试对齐
+            # Attempt alignment
             aligned_labels, identity = align_labels_to_pdb(meta_seq, labels, aa_seq)
             if aligned_labels is None:
                 skipped += 1
@@ -378,7 +378,7 @@ def build_rows(
             row["ExtremeShort"] = str(is_short)
 
             if is_default:
-                # 常规 OOD 列直接复用原计算结果
+                # Reuse existing regular OOD annotations.
                 for col in [
                     "OOD_LowHomology_90", "OOD_LowHomology_80", "OOD_LowHomology_70",
                     "OOD_LowHomology_60", "OOD_LowHomology_50", "OOD_LowHomology_40",
@@ -397,17 +397,17 @@ def build_rows(
                 row["OOD_CATH_FoldHoldout"] = str(fold_ood)
                 row["OOD_CATH_SuperfamilyHoldout"] = str(sf_ood)
 
-                # NewFunction：所有 EC 类别均未见于 train+val
+                # NewFunction: all EC classes are unseen in train+val.
                 nf = compute_new_function(
                     seq_hash, ec_map, pair_meta, metadata_by_hash, trainval_ec
                 )
                 row["OOD_NewFunction"] = str(nf)
 
-                # LongTail：界面正样本比例低于阈值
+                # LongTail: interface-positive fraction below threshold.
                 lt = compute_longtail(final_labels, threshold=longtail_threshold)
                 row["OOD_LongTail"] = str(lt)
             else:
-                # 极端长度样本的常规 OOD 列直接写 NaN（空字符串，"未计算"语义）
+                # Extreme-length regular OOD columns receive NaN (empty strings; not computed).
                 for col in [
                     "OOD_LowHomology_90", "OOD_LowHomology_80", "OOD_LowHomology_70",
                     "OOD_LowHomology_60", "OOD_LowHomology_50", "OOD_LowHomology_40",

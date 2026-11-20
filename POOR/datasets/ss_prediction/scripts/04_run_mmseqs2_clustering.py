@@ -2,15 +2,15 @@
 """
 Stage 4: Global sequence clustering with MMseqs2 at 95% identity.
 
-单阶段（v3，2026-09-02）：对 stage2 全部链（len>=31，含 31–59aa 短链）
-跑一次 easy-linclust（直接喂 FASTA——mmseqs 18.8cc5c 的 easy-linclust
-直接接受 FASTA；预建 DB 输入在该版本会报 createdb 错误），
-按规则选代表（簇内最长优先，再按 chain_key 字母序）。
+Single stage (v3, 2026-09-02): run easy-linclust once on all stage2 chains
+(length >=31, including short 31–59-aa chains), supplying FASTA directly. mmseqs 18.8cc5c
+easy-linclust accepts FASTA; prebuilt database inputs trigger createdb errors in this version.
+Choose the longest representative per cluster, breaking ties lexicographically by chain_key.
 
-复现说明：当前发布的数据由历史两阶段路线产出（主池 >=60 单独聚类 +
-短链 <60 单独聚类、交叉去重、事后删除 <=30 代表，详见 DATA_PROCESS.md
-历史沿革）。单阶段全量聚类在"簇内最长优先"规则下与两阶段路线等价到
-linclust 边界 tie-break，允许存在少量偏差。
+Reproduction note: published data use the historical two-stage route: cluster >=60-aa and
+<60-aa pools separately, cross-deduplicate, then remove <=30-aa representatives (see history
+in DATA_PROCESS.md). Under longest-first selection, the single-stage route is equivalent
+except for linclust boundary tie-breaking; small differences are allowed.
 
 Inputs:
     ss_prediction/output/stage2_chain_sequences.fa
@@ -96,7 +96,7 @@ def parse_clusters(tsv_path) -> dict:
 def select_representatives(clusters: dict, meta_df: pd.DataFrame) -> pd.DataFrame:
     """Select the best representative from each cluster.
 
-    规则：簇内最长序列优先，再按 chain_key 字母序。"""
+    Rule: longest sequence per cluster, then lexicographic chain_key."""
     meta_df = meta_df.copy()
     meta_df["chain_key"] = meta_df["pdb_id"] + "_" + meta_df["chain_id"]
     lookup = meta_df.set_index("chain_key")

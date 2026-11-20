@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""用 CATH+TED 统一标注重算 PPIS test 的 OOD_FoldHoldout / OOD_SuperfamilyHoldout。
+"""Recompute PPIS test OOD_FoldHoldout / OOD_SuperfamilyHoldout with canonical CATH+TED annotations.
 
-流程：
-1. seq_hash -> (pdb, chain)（复用已归档 add_cath_holdout_ood.py 的映射逻辑），生成链清单；
-2. 调用 .skills/cath-ted-domain-annotation/scripts/cath_ted_annotate.py（--offline，共享缓存）；
-3. 调用 .skills/cath-ted-domain-annotation/scripts/cath_ted_holdout.py 计算 Holdout
-   （train-only 参考、any 语义、无注释 -> False，口径以该脚本为唯一实现）；
-4. 就地更新 splits/ppis_test.csv 的两列（其余列不动）；
-   Default=False（极端长度）行直接写 NaN（空单元格，"未计算"语义，
-   全项目统一惯例）；finalize_ood_columns.py --mode nan 仅作兜底校验。
+Workflow:
+1. Map seq_hash -> (pdb, chain), reusing archived add_cath_holdout_ood.py logic, to build a chain list.
+2. Run .skills/cath-ted-domain-annotation/scripts/cath_ted_annotate.py (--offline, shared cache).
+3. Run .skills/cath-ted-domain-annotation/scripts/cath_ted_holdout.py for holdouts
+               (training-only reference, any semantics, unannotated -> False; sole canonical implementation).
+4. Update only two columns in splits/ppis_test.csv, preserving other columns.
+               Write NaN for Default=False extreme-length rows (empty cells, not-computed semantics,
+               project convention); finalize_ood_columns.py --mode nan only validates.
 """
 import csv
 import subprocess

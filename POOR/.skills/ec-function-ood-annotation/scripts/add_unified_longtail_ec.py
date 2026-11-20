@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""统一 LongTailEC OOD 口径并落盘到 10 个任务的 test csv。
+"""Unify LongTailEC OOD definitions and write test CSVs for ten tasks.
 
-统一定义（2026-08-27 确定）：
-- 参考集：train only（逐样本计数：携带某 EC 类别的 train 样本数）
-- 层级：EC L3 与 L4
-- 阈值：train 频次 < 5 / < 10（**含 0**，即 train 中未出现的类别也算）
-- 语义：样本所有 EC（对应层级）都满足频次条件 → True（all-not-in）；无 EC 注释 → False
-- 新列（4 列，追加到末尾）：
+Canonical definition (2026-08-27):
+- Reference: training-only per-sample counts, i.e. training samples carrying each EC class.
+- Levels: EC L3 and L4.
+- Thresholds: training frequency <5 / <10, **including zero** for classes absent from training.
+- All ECs at the given level must meet the frequency condition (all-not-in); no EC -> False.
+- Append four new columns:
   OOD_LongTail_EC_L3_le5 / OOD_LongTail_EC_L3_le10 /
   OOD_LongTail_EC_L4_le5 / OOD_LongTail_EC_L4_le10
-- Default=False（极端长度预挑出）行一律置 NaN（"未计算"语义，全项目统一
-  惯例，流水线位置直接写入；finalize --mode nan 仅作兜底校验），仅 Default/非ES 子集参与计算
-- 旧 LongTailEC 列被新列替换（kcat 的 OOD_LongTail_EC_L3、optimal_ph 的
-  OOD_LongTail_EC_L3_le5/le10、ppi/ligand_affinity 及本次新增的 OOD_LongTail_EC_L4）
+- Default=False extreme-length rows receive NaN (not computed) directly in the pipeline;
+  finalize --mode nan is fallback validation only. Compute on Default/non-ES subsets.
+- Replace legacy LongTailEC columns: kcat OOD_LongTail_EC_L3; optimal_ph
+  OOD_LongTail_EC_L3_le5/le10; ppi/ligand_affinity and newly added OOD_LongTail_EC_L4.
 
-用法：python3 .skills/ec-function-ood-annotation/scripts/add_unified_longtail_ec.py
+Usage: python3 .skills/ec-function-ood-annotation/scripts/add_unified_longtail_ec.py
 """
 import csv
 import gzip
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pandas as pd
 
-# 仓库根：.skills/ec-function-ood-annotation/scripts/ 上溯 3 级
+# Repository root: three levels above .skills/ec-function-ood-annotation/scripts/.
 POOR = Path(__file__).resolve().parents[3]
 SIFTS_EC_TSV = POOR / "data" / "sifts" / "sifts_chain_ec.tsv.gz"
 SIFTS_EC_JSON = POOR / "data" / "sifts" / "sifts_ec_annotations.json"
@@ -40,7 +40,7 @@ def levels(ec):
             ec if len(parts) == 4 else None)
 
 
-# ---------------------------------------------------------------- EC 源
+# ---------------------------------------------------------------- EC sources
 def load_sifts_chain_ec():
     m = defaultdict(set)
     with gzip.open(SIFTS_EC_TSV, "rt") as f:
@@ -72,9 +72,9 @@ def ec_json_fallback(j, pdb, ch):
     return set()
 
 
-# ---------------------------------------------------------------- 核心计算
+# ---------------------------------------------------------------- Core computation
 def compute(train_ec_sets, test_ids, test_ec_of):
-    """返回 DataFrame（index=test_ids，列=NEW_COLS，bool）。"""
+    """Return a boolean DataFrame indexed by test_ids with columns NEW_COLS."""
     f3, f4 = Counter(), Counter()
     for s in train_ec_sets:
         for x in {levels(e)[0] for e in s} - {None}:
@@ -96,13 +96,13 @@ def compute(train_ec_sets, test_ids, test_ec_of):
 
 
 def apply(test, flags, mask, nan_for_excluded):
-    """把 flags 写入 test：mask 行用计算值，其余行 False 或 NaN。返回 (test, counts)。"""
+    """Write flags to test: computed values on mask, otherwise False/NaN. Return (test, counts)."""
     for col in NEW_COLS:
         if nan_for_excluded:
             test[col] = pd.Series(pd.NA, index=test.index, dtype=object)
         else:
             test[col] = False
-        # unique_id 可能重复（如 kcat 同酶多底物），同一 uid 的 flags 相同，用 dict 映射
+        # unique_id may repeat for multi-substrate kcat; flags agree per ID, so map through a dict.
         lut = flags[col].groupby(level=0).first().to_dict()
         test.loc[mask, col] = test.loc[mask, "unique_id"].map(lut).to_numpy()
     counts = {col: int((test[col] == True).sum()) for col in NEW_COLS}  # noqa: E712
@@ -144,7 +144,7 @@ def main():
     for (p, c), es in sifts.items():
         pdb_ec[p] |= es
 
-    # ---- kcat（UniProt accession → 原始数据 EC） ----
+    # ---- kcat: UniProt accession -> raw EC annotations. ----
     km = pd.read_csv(POOR / "datasets/enzyme_kinetics_prediction/data/kcat_with_reactant_ecfp4.csv",
                      usecols=["uniprot", "ec"], dtype=str)
     kcat_ec = km.dropna(subset=["ec"]).groupby("uniprot")["ec"].apply(lambda x: {e.strip() for v in x for e in str(v).split(";") if e.strip() and e.strip() != "-"}).to_dict()
@@ -168,7 +168,7 @@ def main():
              lambda t: t["Default"] == True, nan_for_excluded=True,  # noqa: E712
              drop_cols=["OOD_LongTail_EC_L3_le5", "OOD_LongTail_EC_L3_le10"])
 
-    # ---- ligand_affinity（pdb → 所有链 EC） ----
+    # ---- ligand_affinity: PDB -> union of ECs across all chains. ----
     run_task("ligand_affinity", POOR / "datasets/ligand_binding_affinity",
              "ligand_binding_affinity_test.csv", "ligand_binding_affinity_train.csv",
              lambda u: pdb_ec.get(u.lower(), set()),
@@ -176,7 +176,7 @@ def main():
              lambda t: t["Default"] == True, nan_for_excluded=True,  # noqa: E712
              drop_cols=["OOD_LongTail_EC_L4"])
 
-    # ---- ppi（UniProt 缓存 + SIFTS 双路，bio/xtal 解析 unique_id，random 走 protein_*_id） ----
+    # ---- ppi: UniProt cache + SIFTS; parse bio/xtal unique_id, random protein_*_id. ----
     ec_csv = pd.read_csv(POOR / "datasets/ppi_prediction/output/uniprot_ec_mapping.csv")
     ec_csv["ec_numbers"] = ec_csv["ec_numbers"].fillna("")
     uniprot_ec = {r["uniprot_id"]: {x.strip() for x in str(r["ec_numbers"]).split(";") if x.strip()}
@@ -199,7 +199,7 @@ def main():
                     ecs |= uniprot_ec.get(pid, set())
         return ecs
 
-    # ppi 按行（而非 unique_id）取 EC，单独处理
+    # PPI EC lookup uses individual rows rather than unique_id; handle separately.
     ppi_dir = POOR / "datasets/ppi_prediction"
     ppi_test = pd.read_csv(ppi_dir / "splits/ppi_test.csv")
     ppi_train = pd.read_csv(ppi_dir / "splits/ppi_train.csv")
@@ -224,7 +224,7 @@ def main():
         for c, v in zip(NEW_COLS, vals):
             cols_data[c].append(v)
     for c in NEW_COLS:
-        # Default=False（极端长度）行置 NaN（全项目统一惯例，流水线位置直接写入）
+        # Default=False extreme-length rows receive NaN directly by project convention.
         ppi_test[c] = [v if m else pd.NA for v, m in zip(cols_data[c], mask)]
     counts = {c: int((ppi_test[c] == True).sum()) for c in NEW_COLS}  # noqa: E712
     ppi_test.to_csv(ppi_dir / "splits/ppi_test.csv", index=False)
@@ -252,7 +252,7 @@ def main():
              lambda t: t["Default"] == True, nan_for_excluded=True,  # noqa: E712
              drop_cols=["OOD_LongTail_EC_L4"])
 
-    # ---- ppis（seq_hash 映射链） ----
+    # ---- ppis: map seq_hash to chains. ----
     with open(POOR / "datasets/ppis_prediction/output/dips_plus_metadata.csv") as f:
         pair_meta = {r["unique_id"]: r for r in csv.DictReader(f)}
     with open(POOR / "datasets/ppis_prediction/output/chain_centric_dedup_metadata.csv") as f:
@@ -277,7 +277,7 @@ def main():
              lambda t: t["Default"] == True, nan_for_excluded=True,  # noqa: E712
              drop_cols=["OOD_LongTail_EC_L4"])
 
-    # ---- fold（非 ExtremeShort 行计算，ES 行 NaN） ----
+    # ---- fold: compute non-ExtremeShort rows; ES rows receive NaN. ----
     run_task("fold", POOR / "datasets/fold_classification",
              "cath_test.csv", "cath_train.csv",
              lambda u: ec_json_exact(ecj, u[:4], u[4]),
@@ -285,7 +285,7 @@ def main():
              lambda t: t["OOD_ExtremeShort"] != True, nan_for_excluded=True,  # noqa: E712
              drop_cols=["OOD_LongTail_EC_L4"])
 
-    # ---- PDA cath_design（非 ES 行计算，ES 行 NaN；train 参考 = fold train） ----
+    # ---- PDA cath_design: non-ES computation, ES NaN; reference = fold training. ----
     pda_dir = POOR / "datasets/protein-design-archive"
     fold_train_ids = pd.read_csv(
         POOR / "datasets/fold_classification/splits/cath_train.csv",
@@ -304,9 +304,9 @@ def main():
     print(f"PDA: computed={int(mask.sum())}, " +
           " ".join(f"{c.split('EC_')[1]}={n}" for c, n in counts.items()))
 
-    # ---- func_ec（仅 L4 两列；L3 级 LongTailEC 与任务预测层级冲突，不加） ----
-    # func ec 的 label 为 L3 级（x.x.x.- 形式），其 OOD_LongTail 已是 L3 级 EC 长尾；
-    # LongTailEC 使用 SIFTS 链级真实 L4 注释（与 NewEC_L4 同源），all-not-in。
+    # ---- func_ec: two L4 columns only; L3 LongTailEC conflicts with the prediction level. ----
+    # func_ec labels are L3 ECs (x.x.x.-); OOD_LongTail already describes their L3 long tail.
+    # LongTailEC uses SIFTS true chain-level L4 annotations, as NewEC_L4, with all-not-in semantics.
     func_dir = POOR / "datasets/func_prediction"
     key_f = lambda u: (u[:4].lower(), u[5:])
     func_test = pd.read_csv(func_dir / "splits/ec_test.csv")
@@ -321,7 +321,7 @@ def main():
                     lambda u: sifts.get(key_f(u), set()))
     for col in ["OOD_LongTail_EC_L4_le5", "OOD_LongTail_EC_L4_le10"]:
         lut = flags[col].groupby(level=0).first().to_dict()
-        # Default=False（极端长度）行置 NaN（全项目统一惯例，流水线位置直接写入）
+        # Default=False extreme-length rows receive NaN directly by project convention.
         func_test[col] = pd.Series(pd.NA, index=func_test.index, dtype=object)
         func_test.loc[mask, col] = func_test.loc[mask, "unique_id"].map(lut).to_numpy()
     counts = {c: int((func_test[c] == True).sum())  # noqa: E712

@@ -58,22 +58,22 @@ class AverageMeter(object):
 
 
 def pmap_multi(pickleable_fn, data, n_jobs=None, verbose=1, desc=None, **kwargs):
-    """并行 map：对 data 中每个元素 d 调用 pickleable_fn(*d, **kwargs)。
+    """Parallel map: call pickleable_fn(*d, **kwargs) for every element d in data.
 
-    使用 joblib loky 后端，fn 及参数需可 pickle；d 必须是 tuple，
-    单参数时传成 (d,) 即可。
+    Uses the joblib loky backend; the function and arguments must be pickleable.
+    Each d must be a tuple; use (d,) for a single argument.
     """
     if n_jobs is None:
         n_jobs = cpu_count()
 
-    # 定义一个真正可以 pickling 的函数，避免 lambda 引起问题
+    # Define a pickleable function rather than a lambda.
     def _wrapped(d):
         return pickleable_fn(*d, **kwargs)
 
-    # tqdm 外部包裹，不要嵌入 generator 里
+    # Wrap tqdm outside the generator.
     data_iter = list(tqdm(data, desc=desc))
 
-    with parallel_backend('loky'):  # 或 'multiprocessing'
+    with parallel_backend('loky'):  # Alternatively, use 'multiprocessing'.
         results = Parallel(n_jobs=n_jobs, verbose=verbose, timeout=None)(
             delayed(_wrapped)(d) for d in data_iter
         )

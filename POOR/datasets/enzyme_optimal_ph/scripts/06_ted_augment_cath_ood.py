@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""为 enzyme_optimal_ph test 集追加 OOD_FoldHoldout / OOD_SuperfamilyHoldout（CATH+TED 口径）。
+"""Add CATH+TED OOD_FoldHoldout / OOD_SuperfamilyHoldout to enzyme_optimal_ph test.
 
-样本键为 UniProt accession（unique_id 即 accession）：skill 的 uniprot 模式
-（CATH 经 SIFTS 反查并集 + TED 全长标注），train-only 对称参考、any 语义、
-无注释 -> False；Default=False 极端长度行直接写回 NaN（空单元格，"未计算"
-语义，全项目统一惯例）。finalize_ood_columns.py --mode nan 仅作兜底校验。
+Sample key: UniProt accession (unique_id). Use the skill in uniprot mode:
+CATH union via reverse SIFTS mapping + full-length TED; symmetric training-only reference, any semantics,
+unannotated -> False. Default=False extreme-length rows receive empty cells/NaN (not computed),
+following project convention. finalize_ood_columns.py --mode nan is only a fallback check.
 
-holdout 判定统一调用 .skills/cath-ted-domain-annotation/scripts/cath_ted_holdout.py
-（全项目唯一实现），本脚本只负责标注、调用与写回 splits。
+Use .skills/cath-ted-domain-annotation/scripts/cath_ted_holdout.py for all holdout decisions;
+this is the sole project-wide implementation. This wrapper handles annotation, invocation, and split updates.
 """
 import csv
 import subprocess
@@ -28,8 +28,8 @@ TEST_CSV = TASK_DIR / "splits/optimal_ph_prediction_test.csv"
 subprocess.run([sys.executable, str(ANNOTATE), "--chains", str(ACC_LIST),
                 "--out", str(LABELS), "--offline"], check=True)
 
-# holdout 重算：调用 skill 统一脚本（参考集 = splits 列含 train 的行并集，
-# any 语义、无注释 -> False），标签表的归属列名为 splits
+# Recompute holdouts with the canonical skill: union labels from rows whose splits contain train,
+# any semantics, unannotated -> False; the membership column is named splits.
 with tempfile.TemporaryDirectory(prefix="holdout_", dir=TASK_DIR / "output") as tmp:
     flagged = Path(tmp) / "test_flagged.csv"
     subprocess.run([sys.executable, str(HOLDOUT), "--labels", str(LABELS),

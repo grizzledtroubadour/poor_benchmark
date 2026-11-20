@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# 脚本：01_download_pdbbind2020.sh
-# 用途：检查、解压 PDBbind v2020 / v2020.R1 源数据包，并生成 source_manifest.json
-# 使用：
+# Script: 01_download_pdbbind2020.sh
+# Purpose: Check and extract PDBbind v2020 / v2020.R1 archives and generate source_manifest.json.
+# Usage:
 #   cd binding_affinity/
 #   bash scripts/01_download_pdbbind2020.sh
 #
-# 支持两种数据包格式：
-#   A. 旧版 PDBbind-CN（3 个独立包）：
+# Supports two archive formats:
+#   A. Legacy PDBbind-CN (three separate archives):
 #        - PDBbind_v2020_plain_text_index.tar.gz
 #        - PDBbind_v2020_refined.tar.gz
 #        - PDBbind_v2020_other_PL.tar.gz
-#   B. 新版 PDBbind+ v2020.R1 免费数据包（2 个包）：
+#   B. PDBbind+ v2020.R1 free distribution (two archives):
 #        - index.tar.gz
-#        - P-L.tar.gz   （蛋白-配体复合物，按 release year 分区）
+#        - P-L.tar.gz   (protein-ligand complexes partitioned by release year)
 #
-# 注意：
-#   原 PDBbind-CN 站点（pdbbind.org.cn）已无法访问。
-#   请从 PDBbind+ 手动下载：https://www.pdbbind-plus.org.cn/download
+# Note:
+#   The original PDBbind-CN site (pdbbind.org.cn) is no longer accessible.
+#   Download manually from PDBbind+:https://www.pdbbind-plus.org.cn/download
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -30,13 +30,13 @@ MANIFEST="${DATA_DIR}/source_manifest.json"
 mkdir -p "${DATA_DIR}"
 
 echo "=========================================="
-echo "PDBbind v2020 源数据检查 / 解压脚本"
+echo "PDBbind v2020 source-data checking / extraction script"
 echo "=========================================="
-echo "数据目录: ${DATA_DIR}"
+echo "Data directory: ${DATA_DIR}"
 echo
 
 # ---------------------------------------------------------------------------
-# 检查/解压新版 PDBbind+ v2020.R1 数据包
+# Check/extract PDBbind+ v2020.R1 archives.
 # ---------------------------------------------------------------------------
 NEW_PACKAGES=("index.tar.gz" "P-L.tar.gz")
 new_found=0
@@ -44,26 +44,26 @@ for pkg in "${NEW_PACKAGES[@]}"; do
     if [[ -f "${DATA_DIR}/${pkg}" ]]; then
         new_found=$((new_found + 1))
         size=$(du -h "${DATA_DIR}/${pkg}" | cut -f1)
-        echo "[已找到] ${pkg} (${size})"
+        echo "[Found] ${pkg} (${size})"
     fi
 done
 
 if [[ ${new_found} -eq ${#NEW_PACKAGES[@]} ]]; then
     echo
-    echo "检测到 PDBbind+ v2020.R1 数据包。"
+    echo "Detected PDBbind+ v2020.R1 archives."
     for pkg in "${NEW_PACKAGES[@]}"; do
         src="${DATA_DIR}/${pkg}"
         top_dir=$(tar -tzf "${src}" | head -1 | cut -d/ -f1) || true
         dst="${DATA_DIR}/${top_dir}"
         if [[ -d "${dst}" ]]; then
-            echo "[跳过] ${dst}/ 已存在"
+            echo "[Skip] ${dst}/ already exists"
         else
-            echo "[解压] ${pkg} -> ${DATA_DIR}/"
+            echo "[Extract] ${pkg} -> ${DATA_DIR}/"
             tar -xzf "${src}" -C "${DATA_DIR}"
         fi
     done
     echo
-    echo "生成 source_manifest.json..."
+    echo "Generating source_manifest.json..."
     python3 - <<'PY' "${DATA_DIR}" "${MANIFEST}"
 import os, sys, json, hashlib
 from datetime import datetime
@@ -95,13 +95,13 @@ for tar_name in ["index.tar.gz", "P-L.tar.gz"]:
         pkg["tarball_md5"] = md5(tar_path)
     manifest["packages"].append(pkg)
 
-# 索引文件
+# Index file
 index_dir = os.path.join(data_dir, "index")
 expected_indices = ["INDEX_general_PL.2020R1.lst", "INDEX_general_PP.2020R1.lst",
                     "INDEX_general_PN.2020R1.lst", "INDEX_general_NL.2020R1.lst"]
 manifest["index_files"] = {name: os.path.isfile(os.path.join(index_dir, name)) for name in expected_indices}
 
-# P-L 结构统计
+# P-L structure statistics
 pl_dir = os.path.join(data_dir, "P-L")
 if os.path.isdir(pl_dir):
     ranges = [d for d in os.listdir(pl_dir) if os.path.isdir(os.path.join(pl_dir, d))]
@@ -118,7 +118,7 @@ PY
 
     echo
     echo "=========================================="
-    echo "源数据准备完成"
+    echo "Source data preparation complete"
     echo "=========================================="
     cat "${MANIFEST}"
     echo
@@ -126,7 +126,7 @@ PY
 fi
 
 # ---------------------------------------------------------------------------
-# 检查/解压旧版 PDBbind-CN 数据包
+# Check/extract legacy PDBbind-CN archives.
 # ---------------------------------------------------------------------------
 OLD_PACKAGES=(
     "PDBbind_v2020_plain_text_index.tar.gz"
@@ -145,24 +145,24 @@ for pkg in "${OLD_PACKAGES[@]}"; do
     if [[ -f "${DATA_DIR}/${pkg}" ]]; then
         old_found=$((old_found + 1))
         size=$(du -h "${DATA_DIR}/${pkg}" | cut -f1)
-        echo "[已找到] ${pkg} (${size})"
+        echo "[Found] ${pkg} (${size})"
     else
-        echo "[缺失]   ${pkg}"
+        echo "[Missing]   ${pkg}"
         missing+=("${pkg}")
     fi
 done
 
 if [[ ${old_found} -eq ${#OLD_PACKAGES[@]} ]]; then
     echo
-    echo "检测到旧版 PDBbind-CN 数据包。"
+    echo "Detected legacy PDBbind-CN archives."
     for i in "${!OLD_PACKAGES[@]}"; do
         pkg="${OLD_PACKAGES[$i]}"
         dst="${DATA_DIR}/${OLD_EXTRACT_DIRS[$i]}"
         src="${DATA_DIR}/${pkg}"
         if [[ -d "${dst}" ]]; then
-            echo "[跳过] ${dst}/ 已存在"
+            echo "[Skip] ${dst}/ already exists"
         else
-            echo "[解压] ${pkg} -> ${dst}/"
+            echo "[Extract] ${pkg} -> ${dst}/"
             tar -xzf "${src}" -C "${DATA_DIR}"
             top_dir=$(tar -tzf "${src}" | head -1 | cut -d/ -f1)
             if [[ "${top_dir}" != "${OLD_EXTRACT_DIRS[$i]}" && -d "${DATA_DIR}/${top_dir}" ]]; then
@@ -174,17 +174,17 @@ if [[ ${old_found} -eq ${#OLD_PACKAGES[@]} ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 未找到任何完整数据包
+# No complete archive set found.
 # ---------------------------------------------------------------------------
 echo
-echo "ERROR: 未在 ${DATA_DIR} 中找到完整的数据包。"
+echo "ERROR: No complete archive set found in ${DATA_DIR}."
 echo
-echo "请从 PDBbind+ 手动下载（推荐 v2020.R1 免费数据包）："
-echo "  1. 访问 https://www.pdbbind-plus.org.cn/download"
-echo "  2. 注册并登录免费账号"
-echo "  3. 下载以下文件并放入 ${DATA_DIR}/："
+echo "Download manually from PDBbind+ (the free v2020.R1 distribution is recommended):"
+echo "  1. Visit https://www.pdbbind-plus.org.cn/download"
+echo "  2. Register and log in with a free account."
+echo "  3. Download the following files into ${DATA_DIR}/："
 echo "       - index.tar.gz"
 echo "       - P-L.tar.gz"
-echo "  4. 重新运行本脚本"
+echo "  4. Run this script again."
 echo
 exit 1

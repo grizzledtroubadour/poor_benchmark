@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""按 resseq 连续段锚定修复"结构残基数 != aa_seq 长度"行的 struct_label。
+"""Repair struct_label for structure-residue/aa_seq length mismatches using contiguous resseq anchors.
 
-这些行的结构缺失若干残基，add_struct_label.py 的序列比对在低复杂度区
-缺口放置任意，导致界面标签错帧（详见 DATA_PROCESS.md 5.7 注记）。
-本脚本利用 pdb 保留的 resseq 编号做确定性映射：
-  - 结构残基按 (chain,resseq,icode) 首次出现枚举，resseq 连续段独立处理；
-  - 每段在 aa_seq 中找**唯一精确匹配**锚定（序列一致率本就 100%）；
-    唯一则段内按 resseq 顺序同步映射；不唯一/无匹配则该段残基置 -1；
-  - 跨段校验：映射的 aa_seq 位置必须单调不重叠，否则整行报错不改。
-消除了比对缺口放置的任意性。
+These structures omit residues; sequence alignment in add_struct_label.py can place gaps
+arbitrarily in low-complexity regions and misalign interface labels (DATA_PROCESS.md §5.7).
+Use retained PDB resseq numbering for deterministic mapping:
+            - Enumerate first occurrences of (chain,resseq,icode); process contiguous segments separately.
+            - Anchor each segment to a unique exact match in aa_seq (sequence identity is already 100%).
+                        Map unique anchors in resseq order; ambiguous or absent matches receive -1.
+            - Across segments, require monotonic non-overlapping aa_seq positions; otherwise reject the row.
+This removes arbitrary alignment-gap placement.
 
 Usage: python3 14_fix_struct_label_resseq.py [--apply]
 """
@@ -37,9 +37,9 @@ def parse_pdb(path):
     return res
 
 def fix_row(residues, aa_seq, labels):
-    """返回 (new_struct_label, stats) 或 (None, reason)。"""
+    """Return (new_struct_label, stats), or (None, reason)."""
     n = len(residues)
-    # 切连续 resseq 段
+    # Split into contiguous resseq segments.
     runs=[]; cur=[0]
     for i in range(1, n):
         if residues[i][0] == residues[i-1][0] + 1:
@@ -62,7 +62,7 @@ def fix_row(residues, aa_seq, labels):
                 pos_map[i]=j0+k
         else:
             unanchored += len(run)
-    # 单调性校验
+    # Check monotonicity.
     mapped = sorted(pos_map.values())
     if len(mapped)!=len(set(mapped)):
         return None, "overlap"
@@ -79,7 +79,7 @@ def main():
             n=len(residues)
             cur=[int(x) for x in r["struct_label"].strip("[]").split()]
             if len(cur)!=n or n==len(r["aa_seq"]):
-                continue  # 直通/等长路径无风险
+                continue  # Direct/equal-length paths are safe.
             labels=[int(x) for x in r["label"].strip("[]").split()]
             new, st = fix_row(residues, r["aa_seq"], labels)
             if new is None:

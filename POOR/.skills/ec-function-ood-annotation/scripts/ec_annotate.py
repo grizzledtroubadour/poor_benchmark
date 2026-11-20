@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""EC 标注：为样本生成统一的 EC 编号集合（ec-function-ood-annotation skill 第 1 步）。
+"""EC annotation: generate standardized EC sets per sample (ec-function-ood-annotation step 1).
 
-两种输入模式（按列名自动识别）：
-- 链模式：输入含 `pdb`、`chain` 列 → SIFTS 链级 EC（sifts_chain_ec.tsv.gz）
-- UniProt 模式：输入含 `uniprot` 列 → ① SIFTS 反查（pdb_chain_uniprot 的
-  SP_PRIMARY → 链 → 链级 EC 并集）；② 剩余 accession 走 UniProt REST 批量查询
-  （fields=accession,ec），写入项目级共享缓存 data/uniprot_ec_cache.json；
-  `--offline` 仅用缓存，不访问 API
+Two input modes, detected from column names:
+- Chain mode: `pdb`, `chain` columns -> SIFTS chain-level EC（sifts_chain_ec.tsv.gz）
+- UniProt mode: `uniprot` column -> (1) SIFTS reverse mapping (pdb_chain_uniprot
+  SP_PRIMARY -> chains -> union of chain ECs); (2) batch-query remaining accessions through UniProt REST
+  (fields=accession,ec), writing the project-wide data/uniprot_ec_cache.json cache;
+  `--offline` uses cache only, without API access.
 
-输出：输入列之后追加 `ec_numbers`（`;` 分隔完整 EC 编号）、`has_ec`。
-层级解析（L3/L4 截断）由 ec_ood.py 完成，本脚本只负责原始 EC 集合。
+Output: append `ec_numbers` (semicolon-separated full EC numbers) and `has_ec` to input columns.
+ec_ood.py handles L3/L4 truncation; this script only produces raw EC sets.
 
-用法：
+Usage:
     python ec_annotate.py --input my_chains.csv --out my_ec_labels.csv
     python ec_annotate.py --input my_accs.csv --out my_ec_labels.csv --offline
 """
@@ -47,8 +47,8 @@ def load_sifts_chain_ec():
 def load_uniprot_to_chains():
     m = defaultdict(list)
     with gzip.open(SIFTS_PDB_CHAIN_UNIPROT, "rt") as f:
-        next(f)  # 注释行
-        next(f)  # 表头
+        next(f)  # Comment line
+        next(f)  # Header
         for line in f:
             p = line.strip().split("\t")
             if len(p) >= 3:
@@ -57,7 +57,7 @@ def load_uniprot_to_chains():
 
 
 def fetch_ec_batch(ids):
-    """UniProt REST 批量查询 EC（同 ppi_prediction/scripts/fetch_uniprot_ec.py）。"""
+    """Batch-query ECs through UniProt REST, as in ppi_prediction/scripts/fetch_uniprot_ec.py."""
     query = " OR ".join(f"accession:{x}" for x in ids)
     params = {"query": query, "format": "tsv", "fields": "accession,ec", "size": len(ids)}
     r = requests.get(UNIPROT_SEARCH_URL, params=params, timeout=60)
@@ -74,7 +74,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--offline", action="store_true", help="仅使用缓存，不访问 UniProt API")
+    ap.add_argument("--offline", action="store_true", help="Use cache only, without UniProt API access.")
     ap.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
     args = ap.parse_args()
 
@@ -86,7 +86,7 @@ def main():
     elif "uniprot" in fieldnames:
         mode = "uniprot"
     else:
-        raise SystemExit("无法识别输入模式：需要 (pdb, chain) 列或 uniprot 列")
+        raise SystemExit("Unrecognized input mode: require (pdb, chain) columns or a uniprot column.")
     print(f"mode: {mode}; input rows: {len(rows)}")
 
     chain_ec = load_sifts_chain_ec()
@@ -104,9 +104,9 @@ def main():
                 s |= chain_ec.get(ck, set())
             ec_of_row[a] = s
         covered = sum(bool(ec_of_row[a]) for a in accs)
-        print(f"accessions: {len(accs)}, with EC via SIFTS 反查: {covered}")
+        print(f"accessions: {len(accs)}, with EC via SIFTS reverse mapping: {covered}")
 
-        # UniProt API 补缺
+        # Fill missing annotations through UniProt API.
         cache = json.load(open(args.cache)) if args.cache.exists() else {}
         missing = [a for a in accs if not ec_of_row[a] and a not in cache]
         print(f"cached: {sum(a in cache for a in accs)}, to query: {len(missing)}")
@@ -116,7 +116,7 @@ def main():
                 try:
                     res = fetch_ec_batch(batch)
                 except Exception as e:
-                    print(f"  batch {i} 查询失败: {e}")
+                    print(f"  batch {i} query failed: {e}")
                     res = {}
                 for a in batch:
                     cache[a] = res.get(a, [])
@@ -128,7 +128,7 @@ def main():
         for a in accs:
             if not ec_of_row[a]:
                 ec_of_row[a] = set(cache.get(a, []))
-        print(f"with EC after API 补缺: {sum(bool(ec_of_row[a]) for a in accs)}/{len(accs)}")
+        print(f"with EC after API completion: {sum(bool(ec_of_row[a]) for a in accs)}/{len(accs)}")
 
     if "ec_numbers" not in fieldnames:
         fieldnames += ["ec_numbers", "has_ec"]

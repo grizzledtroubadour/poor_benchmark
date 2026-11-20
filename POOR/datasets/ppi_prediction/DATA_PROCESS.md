@@ -1,402 +1,393 @@
-# PPI Prediction 数据集处理文档
+# PPI Prediction Dataset Processing
 
-> 记录从原始 PPI 数据到最终蛋白质-蛋白质相互作用预测数据集的完整处理流程，可按本文档从原始数据一次性复现。
-> 处理位置：`datasets/ppi_prediction/`（蛋白质-蛋白质相互作用预测任务主目录）
-> 数据源：[PINDER](https://github.com/pinder-org/pinder) (release `2024-02`)
-> 参考论文：Kovtun et al., *PINDER: The Protein INteraction Dataset and Evaluation Resource*, 2024
+> Complete, reproducible workflow from raw PPI data to the final protein–protein interaction dataset.
+> Location: `datasets/ppi_prediction/`
+> Source: [PINDER](https://github.com/pinder-org/pinder), release `2024-02`
+> Reference: Kovtun et al., *PINDER: The Protein INteraction Dataset and Evaluation Resource*, 2024.
 
-## 任务定义与当前规模
+## Task and current scale
 
-本数据集用于**蛋白质-蛋白质相互作用二分类预测**。每个样本是一个蛋白对（蛋白 A / 蛋白 B），标签为 `1`（相互作用）或 `0`（无相互作用）。
+**Binary protein–protein interaction prediction:** each sample is a protein A/B pair, labeled 1 for interaction or 0 for non-interaction.
 
-当前 splits 规模（以 `splits/` 实际文件统计为准）：
+Measured current splits:
 
-| 文件 | 行数 | 组成（正 bio / XTAL 负 / 随机负） |
+| File | Rows | Composition: positive bio / negative XTAL / negative random |
 |------|------|------|
-| `ppi_train.csv` | **58,968** | 29,484 / 10,301 / 19,183 |
-| `ppi_val.csv` | **8,394** | 4,197 / 2,104 / 2,093 |
-| `ppi_test.csv` | **16,264** | 8,132 / 3,947 / 4,185（另含 OOD 标记列，共 37 列） |
+| `ppi_train.csv` | **58,968** | 29,484 /10,301 /19,183 |
+| `ppi_val.csv` | **8,394** | 4,197 /2,104 /2,093 |
+| `ppi_test.csv` | **16,264** | 8,132 /3,947 /4,185; 37 columns including OOD |
 
-Test 内部：`Default=True` 14,939 / `Default=False`（`OOD_ExtremeLong`，任一链 > 1,000）1,325；正负样本严格 1:1。
+Test: Default=True 14,939; Default=False 1,325, triggered by OOD_ExtremeLong when either chain exceeds 1,000 residues. Positive/negative balance is exactly 1:1.
 
-> 所有脚本均从任务目录（`datasets/ppi_prediction/`）下运行。被取代的历史脚本保留在 `output/scripts_archive/`（见归档清单）。
+> Run scripts from datasets/ppi_prediction/. Superseded scripts remain in output/scripts_archive/ (see archive list).
 
 ---
 
-## 阶段一：源数据获取与解析（PINDER 索引 + 序列获取）
+## Stage 1: Obtain and parse PINDER indices and sequences
 
-> 目标：获取 PPI 原始注释表与全部蛋白序列。无需下载 PINDER 完整 700 GB 结构数据。
+> Obtain PPI annotations and all protein sequences without downloading the complete ~700-GB PINDER structure collection.
 
-### 1.1 数据来源
+### 1.1 Sources
 
-位置：`datasets/ppi_prediction/data/`
+Location: `datasets/ppi_prediction/data/`.
 
-| 文件 | 用途 | 大小 | 说明 |
+| File | Purpose | Size | Description |
 |------|------|------|------|
-| `data/index.parquet` | 核心入口 | ~119 MB | 每个 dimer 的元数据与 split 信息 |
-| `data/metadata.parquet` | 详细注释 | ~100 MB | 结构方法、分辨率、接口统计、标签等 |
+| `data/index.parquet` | Main entry point | ~119 MB | Dimer metadata and split information |
+| `data/metadata.parquet` | Detailed annotations | ~100 MB | Methods, resolution, interface statistics, labels |
 
-**核心数据规模（原始 PINDER 2024-02）**：总样本数 2,319,564（index.parquet）；唯一 PDB ID ~62,706；唯一 UniProt ID 47,098；正样本 (BIO) 1,180,362；负样本候选 (XTAL) 873,090。
+**Raw PINDER 2024-02:** 2,319,564 index records; ~62,706 unique PDB IDs; 47,098 unique UniProt IDs; 1,180,362 BIO positives; 873,090 XTAL negative candidates.
 
-**关键字段**：
-
-| 字段 | 类型 | 说明 |
+| Field | Type | Description |
 |------|------|------|
-| `id` | string | PINDER system ID，如 `7rzb__A1_A0A229LVN5--7rzb__A2_A0A229LVN5` |
-| `pdb_id` | string | PDB 四位代码 |
-| `uniprot_R` / `uniprot_L` | string | 受体 / 配体的 UniProt ID |
-| `cluster_id` | string | 接口聚类 ID，用于去冗余 |
-| `split` | string | `train` / `val` / `test` / `invalid`（PINDER 原始划分，本数据集不沿用，见阶段四时间切分） |
-| `label` | string | `BIO`=生物学相互作用（正样本），`XTAL`=晶体接触（负样本候选） |
-| `complex_type` | string | `homomer` / `heteromer` |
-| `length1` / `length2` | int | 受体 / 配体序列长度 |
+| `id` | string | PINDER system ID, e.g. `7rzb__A1_A0A229LVN5--7rzb__A2_A0A229LVN5` |
+| `pdb_id` | string | Four-character PDB code |
+| `uniprot_R` / `uniprot_L` | string | Receptor / ligand UniProt IDs |
+| `cluster_id` | string | Interface cluster ID for deduplication |
+| `split` | string | Original train/val/test/invalid split; not retained here (Stage 4 temporal splitting) |
+| `label` | string | BIO biological interaction; XTAL crystal contact candidate negative |
+| `complex_type` | string | homomer / heteromer |
+| `length 1` / `length 2` | int | Receptor / ligand lengths |
 
-**手动下载命令**：
+Manual download:
 
 ```bash
 aria2c -x 8 -s 8 -o data/index.parquet     "https://storage.googleapis.com/pinder/2024-02/index.parquet"
 aria2c -x 8 -s 8 -o data/metadata.parquet  "https://storage.googleapis.com/pinder/2024-02/metadata.parquet"
 ```
 
-### 1.2 UniProt 序列获取
+### 1.2 Fetch UniProt sequences
 
-**脚本**：`scripts/01_fetch_uniprot_sequences.py`
+**Script:** `scripts/01_fetch_uniprot_sequences.py`.
 
-- 可选地从项目级共享目录 `<repo>/data/uniprot/uniprot_sprot.fasta` 预加载 Swiss-Prot 序列（文件不存在时自动跳过，当前未提供该文件）
-- 通过 UniProt REST API (`rest.uniprot.org/uniprotkb/stream`) 批量下载缺失序列，支持断点续传
-- 输出：`data/uniprot_sequences_all.fasta`
-- 覆盖情况：UniProt API 初始覆盖 PINDER 中 96.33% 的 UniProt ID（45,368 / 47,098），剩余 1,730 个 ID 由下一步回补
+- Optionally preload shared `<repo>/data/uniprot/uniprot_sprot.fasta`; skip automatically if absent (not currently supplied).
+- Batch-download missing sequences through UniProt REST API `rest.uniprot.org/uniprotkb/stream`, supporting resumption.
+- Output: `data/uniprot_sequences_all.fasta`.
+- Initial API coverage: 45,368 /47,098 IDs (96.33%); recover the remaining 1,730 in the next step.
 
-### 1.3 缺失序列从 PDB 单体结构回补
+### 1.3 Recover missing sequences from monomer PDBs
 
-**脚本**：`scripts/05_fetch_missing_sequences_from_pdb.py`
+**Script:** `scripts/05_fetch_missing_sequences_from_pdb.py`.
 
-- 基于 `output/ppi_pairs_corrected_seq95.csv` 找出缺失 UniProt 序列的蛋白
-- 通过 `aria2c` 批量下载对应 PINDER holo 单体 PDB 文件到 `data/pdb_structures_missing/`（3,566 个）
-- 使用 Bio.PDB 解析 ATOM 记录并恢复氨基酸序列，追加到 `data/uniprot_sequences_all.fasta`
-- 缺失判断为 `p not in seqs or not seqs[p]`（空序列记录视为缺失）
-- 自动级联重跑 `04_build_pairs_with_corrected_ranking.py` 与 `09_rebuild_with_xtal_negatives.py`，更新后续 pipeline
+- Identify missing sequences from `output/ppi_pairs_corrected_seq95.csv`.
+- Batch-download 3,566 corresponding PINDER holo monomers into `data/pdb_structures_missing/` with aria2c.
+- Parse ATOM records with Bio.PDB and append recovered sequences to the FASTA.
+- Missing means `p not in seqs or not seqs[p]`: empty records also count as missing.
+- Cascade rerun 04_build_pairs_with_corrected_ranking.py and 09_rebuild_with_xtal_negatives.py.
 
-**回补效果**：成功回补 1,691 个蛋白的序列；最终数据集中仅 1 条样本因序列缺失被过滤，序列覆盖率达 **99.999%**。
+Recovered 1,691 proteins. Only one final sample is filtered for missing sequence: **99.999% coverage**.
 
-> 修复注记（2026-08-28，已落数据）：train 样本 `4p5x__A1_O75746--4p5x__A2_O75746` 的 `aa_seq1/aa_seq2` 曾为空，根源是 `>O75746` 空 fasta 记录（UniProt stream API 空响应产物，全库唯一）且旧缺失判断只看键是否存在。修复：两个 fasta 中的空记录补入 UniProt 当前 678aa 序列（SLC25A12）；`splits/ppi_train.csv` 该行同步补齐（仅 2 个单元格，备份 `output/backup_before_o75746_fix/`）；05 号脚本缺失判断改为同时检查空序列。修复后三个 split 空链样本均为 0。
+> Applied repair, 2026-08-28: training pair `4p5x__A1_O75746--4p5x__A2_O75746` had empty aa_seq1/aa_seq2 because the FASTA contained the only empty record, >O75746, from an empty API response. The old check tested key presence only. Fill both FASTAs with current 678-aa UniProt SLC25A12, update the two train cells, and check empty sequences in script 05. Backup: output/backup_before_o75746_fix/. All splits now have zero empty-chain samples.
 
 ---
 
-## 阶段二：标签聚合与计算（蛋白对标签 + representative 选择 + EC 缓存）
+## Stage 2: Pair labels, representatives, and EC cache
 
-> 目标：按无序蛋白对去重并固化正/负标签来源，为每个蛋白对选择最佳 representative 结构，缓存 UniProt EC 注释。
-> 线性执行顺序为 02 → 03（阶段三去冗余）→ 04；此处按主题归组。
+> Deduplicate unordered pairs, preserve label provenance, select representatives, and cache UniProt EC annotations. Execution order is 02→03 (Stage 3)→04; this section groups by topic.
 
-### 2.1 正/负样本标签来源
+### 2.1 Label sources
 
-PINDER 的 `metadata.label` 字段已提供生物学相关性注释：
+PINDER metadata.label supplies biological relevance:
 
-| 标签 | 含义 | 用途 |
+| Label | Meaning | Use |
 |------|------|------|
-| `BIO` | PRODIGY-cryst 预测为生物学相互作用 | **正样本** (`label=1`) |
-| `XTAL` | 预测为晶体接触（非生理相互作用） | **难负样本** (`label=0`) |
+| BIO | PRODIGY-cryst predicts biological interaction | Positive, label=1 |
+| XTAL | Predicted nonphysiological crystal contact | Hard negative, label=0 |
 
-负样本构造与 1:1 平衡在阶段四划分时完成（见阶段四 Step 1）。
+Construct negatives and balance 1:1 during Stage 4 Step 1.
 
-### 2.2 蛋白对去重（整合所有 split）
+### 2.2 Deduplicate pairs across all original splits
 
-**脚本**：`scripts/02_build_unique_protein_pairs.py`
+**Script:** `scripts/02_build_unique_protein_pairs.py`.
 
-- 整合 train / val / test / invalid 四类数据
-- 按无序蛋白对 `{protein_A_id, protein_B_id}` 去重
-- 若同一蛋白对同时有 BIO 和 XTAL，保留 BIO
-- 输出：`output/ppi_unique_pairs.csv`（74,779 行）
+- Combine train/val/test/invalid.
+- Deduplicate unordered {protein_A_id, protein_B_id} pairs.
+- Prefer BIO if a pair has both BIO and XTAL annotations.
+- Output: `output/ppi_unique_pairs.csv`, 74,779 rows.
 
-### 2.3 Representative 选择（修正后口径）
+### 2.3 Corrected representative selection
 
-**脚本**：`scripts/04_build_pairs_with_corrected_ranking.py`
+**Script:** `scripts/04_build_pairs_with_corrected_ranking.py`.
 
-选择优先级（按顺序）：
+Priority order:
 
-1. **是否有 apo / predicted 单体结构**：`high` 质量 apo > `low` 质量 apo > predicted > 仅 holo
-2. **有效分辨率更高**：PINDER `metadata.parquet` 仅提供 holo 复合物分辨率，未直接给出 apo/predicted 的分辨率或置信度，暂以 holo 分辨率作为代理（见注意事项）
-3. **总长度更长**
-4. **日期最新**
+1. Monomer availability: high-quality apo >low-quality apo >predicted >holo only.
+2. Better effective resolution: use holo complex resolution as a proxy because PINDER metadata does not directly supply apo resolution or predicted confidence (see notes).
+3. Greater total length.
+4. Latest date.
 
-输出：`output/ppi_pairs_corrected_uniprot.csv`（74,779 行）、`output/ppi_pairs_corrected_seq95.csv`（65,214 行，**下游主输入**）
+Outputs: `output/ppi_pairs_corrected_uniprot.csv` (74,779), `output/ppi_pairs_corrected_seq95.csv` (65,214; **main downstream input**).
 
-### 2.4 UniProt EC 编号缓存
+### 2.4 Cache UniProt EC numbers
 
-**脚本**：`scripts/08_fetch_uniprot_ec.py`
+**Script:** `scripts/08_fetch_uniprot_ec.py`.
 
-- 通过 UniProt REST API 批量获取 EC 编号（分号分隔）
-- 输入：`data/uniprot_sequences_all.fasta`；输出：`output/uniprot_ec_mapping.csv`（47,059 条）
-- 供阶段四 EC 功能 OOD（UniProt + SIFTS 双路并集）使用
+- Batch-fetch semicolon-separated EC numbers through UniProt REST.
+- Input: `data/uniprot_sequences_all.fasta`; output: `output/uniprot_ec_mapping.csv`, 47,059 entries.
+- Used with SIFTS in Stage 4 EC OOD.
 
 ---
 
-## 阶段三：去冗余与数据精化（序列去冗余 + 结构选择/staging）
+## Stage 3: Sequence redundancy and structure refinement
 
-### 3.1 序列同一性去重
+### 3.1 Sequence-identity deduplication
 
-**脚本**：`scripts/03_dedup_by_sequence_identity.py`
+**Script:** `scripts/03_dedup_by_sequence_identity.py`.
 
-- 使用 mmseqs2 对 UniProt 序列做 95% identity 聚类
-- 若两对蛋白的每条链都落在同一序列 cluster 中，则视为冗余
-- 输出：`output/ppi_unique_pairs_seq95_dedup.csv`（63,189 行）
+- Cluster UniProt sequences with mmseqs2 at 95% identity.
+- Treat two pairs as redundant if corresponding chains fall in the same sequence clusters.
+- Output: `output/ppi_unique_pairs_seq95_dedup.csv`, 63,189 rows.
 
-### 3.2 单体结构选择与下载
+### 3.2 Select and download monomers
 
-**脚本**：`scripts/06_download_structures_and_filter_test.py`
+**Script:** `scripts/06_download_structures_and_filter_test.py`.
 
-- 为每个 representative pair（BIO + XTAL）的两条链选择最佳单体结构，优先级：**apo 单体 > predicted 单体 (AlphaFold) > holo 单体**
-- 通过 `aria2c` 批量下载选中的单体 PDB 文件到 `data/pdb_structures_all/`
-- 输出：
-  - `output/structure_selection.csv`（65,214 行，representative → 选中结构文件映射，含 `both_chains_apo_or_predicted` 标记）
-  - `output/ppi_test_structure_filtered.csv`（诊断性产物：按结构可得性过滤后的 test 集；**最终 splits 由 09 号脚本生成**，该过滤逻辑已并入 09）
+- For both chains of each BIO/XTAL representative: **apo >predicted AlphaFold >holo**.
+- Batch-download chosen PDBs using aria2c into `data/pdb_structures_all/`.
+- Outputs:
+  - `output/structure_selection.csv`, 65,214 representative-to-structure rows, including both_chains_apo_or_predicted.
+  - `output/ppi_test_structure_filtered.csv`, diagnostic structure-filtered test data. **Final splits come from script 09**, which incorporates this filter.
 
-**结构源分布**（基于 `structure_selection.csv`，65,214 条 representative）：
+Sources among 65,214 representatives:
 
-| R 链源 | L 链源 | 数量 |
+| R source | L source | Count |
 |--------|--------|------|
-| apo    | apo    | 5,648 |
-| apo    | predicted | 3,864 |
-| apo    | holo   | 405 |
+| apo | apo | 5,648 |
+| apo | predicted | 3,864 |
+| apo | holo | 405 |
 | predicted | apo | 2,975 |
 | predicted | predicted | 48,130 |
 | predicted | holo | 642 |
-| holo   | apo    | 216 |
-| holo   | predicted | 695 |
-| holo   | holo   | 2,639 |
+| holo | apo | 216 |
+| holo | predicted | 695 |
+| holo | holo | 2,639 |
 
-R 链：predicted 51,747 / apo 9,917 / holo 3,550；L 链：predicted 52,689 / apo 8,839 / holo 3,686；两条链均为 apo/predicted 的 pair：60,617 / 65,214。选定结构文件共 50,306 个，下载全部成功（`output/structure_download_summary.json`）。
+R: predicted 51,747 /apo 9,917 /holo 3,550. L: predicted 52,689 /apo 8,839 /holo 3,686. Both chains apo/predicted: 60,617 /65,214. All 50,306 selected structure files downloaded successfully; see output/structure_download_summary.json.
 
-### 3.3 结构 staging 到 pdbs/
+### 3.3 Stage structures into pdbs/
 
-**脚本**：`scripts/07_stage_pdbs.py`（2026-08 补缺口新增；历史上该步骤无独立脚本）
+**Script:** `scripts/07_stage_pdbs.py`, added 2026-08 to formalize a previously unscripted step.
 
-- 需要的文件清单 = `splits/ppi_{train,val,test}.csv` 的 `struct_file1`/`struct_file2` 并集（44,178 个；struct_file 列由 09 号脚本按 `structure_selection.csv` 生成）∪ `output/splits_pre_xtal_backup/`（XTAL 重构前历史 splits）引用文件（2,224 个，`--no-pre-xtal` 可关闭）
-- 复制规则（幂等）：目标已存在 → 跳过；源存在 → 复制；源缺失 → 记入 missing 清单
-- **验证结果（2026-08）**：`--dry-run` 生成的期望清单（46,402 个）与现有 `pdbs/` 文件清单双向 diff 均为 0；小批量真实复制与 `pdbs/` 对应文件逐字节一致
-- 注意：当前 `data/pdb_structures_all/` 仅保留 10,690 个文件（多数历史文件已移出），全新环境重放需先运行 06 重新下载全部 50,306 个选定结构；structure_selection 选定但从未被任何 splits 版本引用的 3,904 个文件不属于 staging 范围
+- Required files: union of struct_file1/struct_file2 in current splits (44,178; fields assigned by 09 using structure_selection.csv), plus 2,224 historical pre-XTAL references in output/splits_pre_xtal_backup/. Disable historical inclusion with --no-pre-xtal.
+- Idempotent: existing destination→skip; existing source→copy; missing source→record.
+- Audit, 2026-08: dry-run expected list (46,402) and pdbs/ agree in both directions; sampled copies match existing files byte for byte.
+- Currently data/pdb_structures_all/ retains 10,690 files; others were moved out. Fresh reproduction requires rerunning 06 to download all 50,306. The 3,904 selected files never referenced by any split version are excluded from staging.
 
-### 3.4 结构完整性校验（诊断）
+### 3.4 Structure integrity diagnostics
 
-**脚本**：`scripts/diag_validate_structures.py`（纯诊断，不进主流程）
+**Script:** `scripts/diag_validate_structures.py`, outside the main pipeline.
 
-- 使用 Bio.PDB 解析 `data/pdb_structures_all/` 下所有 PDB 文件，检查空文件、有效 ATOM 残基、可解析性
-- 输出：`output/structure_validation_summary.json`、`output/structure_validation_failed.csv`
-- 校验结果：全部 **50,306** 个下载的 PDB 文件通过完整性校验（empty=0, no_atoms=0, parse_error=0）
+- Parse downloaded PDBs with Bio.PDB, checking zero-size files, ATOM residues, and parsability.
+- Outputs: output/structure_validation_summary.json and output/structure_validation_failed.csv.
+- All **50,306** downloaded files pass: empty=0, no_atoms=0, parse_error=0.
 
 ---
 
-## 阶段四：数据划分与 OOD 标注
+## Stage 4: Splitting and OOD annotation
 
-### Step 1: XTAL 难负样本 + 时间切分重建 splits
+### Step 1: Rebuild splits with XTAL negatives and temporal splitting
 
-**脚本**：`scripts/09_rebuild_with_xtal_negatives.py`
+**Script:** `scripts/09_rebuild_with_xtal_negatives.py`.
 
-负样本由两部分组成，在 train/val/test 划分**之后**按每个 split 独立构造：
+Construct negatives independently **after splitting** within each train/val/test pool:
 
-1. **XTAL 难负样本**：PINDER 标注的 XTAL 对全部保留为负样本。这些是"长得像界面但非生物相互作用"的难负样本，来自真实复合物结构，蛋白池与 BIO 高度重叠（65.2%），消除了"随机配对 vs 真实复合物"的浅层捷径。
-2. **随机配对补齐**：当 XTAL 数量不足时，从同 split 的**全部蛋白池**（BIO + XTAL 蛋白 ID 合并去重）中随机抽取两个蛋白组成负样本对。**两个蛋白允许相同**（模拟同源二聚体负样本），消除 `seq1==seq2 → label=1` 的 homodimer shortcut。排除所有在 `output/ppi_unique_pairs.csv` 中标记为 BIO 或 XTAL 的已知蛋白对。
-3. **1:1 比例**：每个 split 中负样本总量（XTAL + 随机）等于正样本数量。
-4. **`pair_type` 列**：每行标注样本类型——`bio`（正样本）、`xtal`（XTAL 负样本）、`random`（随机配对负样本），train/val/test 三个文件均含此列。
+1. **XTAL hard negatives:** retain all PINDER XTAL pairs. They resemble interfaces but are nonbiological, from real complexes. Protein overlap with BIO is 65.2%, reducing the random-pair versus real-complex shortcut.
+2. **Random completion:** when XTAL is insufficient, sample two proteins from the split's entire deduplicated BIO+XTAL pool. **Self-pairs are allowed**, simulating negative homodimers and removing the seq1==seq2→label1 shortcut. Exclude all known BIO/XTAL pairs in output/ppi_unique_pairs.csv.
+3. **1:1 balance:** total XTAL+random negatives equal positives within each split.
+4. **pair_type:** all splits annotate bio, xtal, or random.
 
-**划分原则**：
-
-| 原则 | 说明 |
+| Rule | Description |
 |------|------|
-| **时间切分** | 按 BIO 样本的 `release_date` 排序，累积 70% / 80% 处切分（**70:10:20**），XTAL 用相同时间节点划分 |
-| **全局长度硬剔除** | 划分前剔除任一链长度 > 2,000 的样本（不进入任何 split） |
-| **train/val 长度限制** | 仅保留单链 ≤ 1,000 的样本（> 1,000 的归入 test 作为 `OOD_ExtremeLong`） |
-| **test 结构过滤** | 仅保留双链均有 apo 或 predicted 结构的样本（inline 完成） |
-| **正负样本平衡** | 每 split 中 BIO 正样本与 XTAL+随机负样本 1:1 |
+| Temporal split | Sort BIO by release_date; split at cumulative 70%/80% (70:10:20). Apply the same date boundaries to XTAL. |
+| Global hard length filter | Remove any pair with a chain >2,000 before splitting. |
+| Train/val length | Chains ≤1,000; move longer pairs into extreme-long test. |
+| Test structure filter | Require apo or predicted structures for both chains; applied inline. |
+| Balance | BIO : (XTAL+random) =1:1 per split. |
 
-- 输入：`output/ppi_pairs_corrected_seq95.csv`、`output/structure_selection.csv`、`output/ppi_unique_pairs.csv`、`data/uniprot_sequences_all.fasta`
-- 随机配对 seed = 42/142/242；test 集同时写入 `Default` 列（任一链 > 1,000 → `False`）
-- 输出：`splits/ppi_{train,val,test}.csv`、`output/xtal_rebuild_summary.json`
+Inputs: output/ppi_pairs_corrected_seq95.csv, output/structure_selection.csv, output/ppi_unique_pairs.csv, data/uniprot_sequences_all.fasta. Random seeds: 42/142/242. Set test Default=False when either chain exceeds 1,000. Outputs: splits/ppi_{train,val,test}.csv, output/xtal_rebuild_summary.json.
 
-> 历史注记：旧版由 `21_resample_negative_pairs.py` 纯随机配对生成全部负样本（不允许自配对），导致 homodimer shortcut 与"随机配对 vs 真实复合物"捷径，模型 AUROC 虚高；09 号脚本（21 → 23 → 09 迭代）引入 XTAL 难负样本 + 允许自配对后解决。旧脚本已归档，XTAL 重构前的旧 splits 备份在 `output/splits_pre_xtal_backup/`。
+> Historically, 21_resample_negative_pairs.py generated random-only negatives without self-pairs, creating homodimer and random/real-complex shortcuts and inflated AUROC. Iterations 21→23→09 introduced XTAL and self-pairs. Old scripts are archived; original splits remain in output/splits_pre_xtal_backup/.
 
-### Step 2: OOD 主体重算（极端长度 / Default / NaN 收尾为本地独有逻辑）
+### Step 2: Recompute local OOD logic
 
-**脚本**：`scripts/10_recompute_all_ood.py`（基于最终 `splits/ppi_{train,val,test}.csv` 一次性计算）
+**Script:** `scripts/10_recompute_all_ood.py`, operating on final splits.
 
-- **OOD_ExtremeShort**：蛋白对中**任意一条链**长度 < 60 → `True`（Default 子集 715 条；另有 16 条"一短一长"混合对属 Default=False 行，此列随收尾置 NaN）
-- **OOD_ExtremeLong**：任意一条链长度 > 1,000 → `True`（1,325 条）；`OOD_ExtremeLong=True` 的行 `Default=False`（14,939 条 Default=True）
-- PPI 任务对极端长度样本**只做标记、不剔除**（train/val 在 Step 1 已限制 ≤ 1,000）
-- **Default=False 行收尾**：仅保留 `OOD_ExtremeLong`（预挑出原因列），其余全部 OOD 列（含 `OOD_ExtremeShort`、`seq_Redundancy_*`、`TM-score_*`）置 NaN，表示"未计算"——与其他任务 Default=False 行惯例统一。备份：`output/backup_before_nondefault_full_nan/`
-- 脚本内 mmseqs2 / Foldseek / IDR / EC 各段已标注 **[superseded]**（见 Step 3–6，重算以 skill 链为准）
+- ExtremeShort: either chain <60; 715 Default samples. Another 16 short+long mixed pairs are Default=False and this flag becomes NaN.
+- ExtremeLong: either chain >1,000; 1,325 samples, all Default=False. Default=True: 14,939.
+- Extreme lengths are flagged, not removed here; Stage 4 Step 1 already restricts train/val to ≤1,000.
+- Default=False: preserve only ExtremeLong, the pre-reservation reason. All other OOD, sequence, TM, and ExtremeShort flags become NaN, meaning not computed. Backup: output/backup_before_nondefault_full_nan/.
+- Inline mmseqs2/Foldseek/IDR/EC sections are **superseded** by Steps 3–6.
 
-### Step 3: 序列同源性（seq_Redundancy_* / OOD_Orphan，仅 Default 子集）
+### Step 3: Sequence homology for Default samples
 
-**正式口径**：`.skills/homology-ood-annotation/scripts/seq_homology_ood.py`
+**Canonical tool:** `.skills/homology-ood-annotation/scripts/seq_homology_ood.py`.
 
-- 参考库 = train+val 全部唯一蛋白序列，query = test 蛋白；mmseqs2 `easy-search -s 7.5`（默认 e-value ≤ 1e-3 显著性门槛）
-- 缓存：`output/ood_mmseqs_test_vs_trainval_easysearch.m8`（skill 格式：query 键 `unique_id|aa_seq{1,2}`，可 `--m8-cache` 重放）
-- **seq_Redundancy_XX**（XX ∈ 90..30，步长 10）：任意一条链 max identity < XX → `True`
-- **OOD_Orphan**：任意一条链在 train+val 中无显著 hit → `True`
+- Reference: all unique train+val protein sequences; query: test proteins. mmseqs2 easy-search -s 7.5 with default significance e-value ≤1e-3.
+- Cache: output/ood_mmseqs_test_vs_trainval_easysearch.m8, skill keys unique_id|aa_seq{1,2}; replay via --m8-cache.
+- seq_Redundancy_XX: XX=90..30, step 10; either chain maximum identity <XX→True.
+- Orphan: either chain lacks significant train+val hits→True.
 
-> 历史注记：旧式 `mmseqs search --max-seqs 10 -e 100 -c 0.0` 参数曾严重低估低阈值 OOD（seq_Redundancy_30 仅 515、Orphan 仅 211），2026-08-27 已改用 easy-search 经 skill 脚本重算写回（备份 `output/backup_before_easysearch_unify/`）；旧缓存 `output/ood_mmseqs_test_vs_trainval.m8` 仅供溯源。本地 10 号脚本的 mmseqs 段已标注 superseded。
+> Legacy mmseqs search --max-seqs10 -e 100 -c 0.0 underestimated low-threshold OOD (seq30 515, Orphan 211). Recomputed with canonical easy-search 2026-08-27. Backup: output/backup_before_easysearch_unify/; old output/ood_mmseqs_test_vs_trainval.m8 is provenance only. Local script 10 section is superseded.
 
-### Step 4: 结构相似性（TM-score_*，仅 Default 子集）
+### Step 4: Structural similarity for Default samples
 
-**正式口径**：`.skills/homology-ood-annotation/scripts/struct_homology_ood.py`
+**Canonical tool:** `.skills/homology-ood-annotation/scripts/struct_homology_ood.py`.
 
-- query = test 蛋白单体结构（`pdbs/`），target = train+val 蛋白单体结构库
-- Foldseek `easy-search`（默认 e-value ≤ 10 门槛）`--format-output query,target,alntmscore`
-- 缓存：`output/ood_foldseek_test_vs_trainval_easysearch.m8`（skill 格式，可 `--m8-cache` 重放）
-- **TM-score_X.X**（0.9..0.3，步长 0.1）：任意一条链 max alntmscore < 阈值 → `True`
+- Query: test monomer structures in pdbs/; target: train+val monomers.
+- Foldseek easy-search, default e-value ≤10, output query, target, alntmscore.
+- Cache: output/ood_foldseek_test_vs_trainval_easysearch.m8, replay via --m8-cache.
+- TM-score_X.X: thresholds 0.9..0.3, step 0.1; either chain maximum alntmscore below threshold→True.
 
-> 历史注记：旧式 `foldseek search -a -e inf` 保留全部弱 hit，曾抬高 max alntmscore、压低低阈值 OOD（TM-score_0.9: 4,827→8,172、TM-score_0.3: 1,610→943），2026-08-27 已统一为 easy-search 重算（备份 `output/backup_before_foldseek_easysearch_unify/`）；旧缓存 `output/ood_foldseek_tmscore.csv` 仅供溯源。本地 10 号脚本的 foldseek 段已标注 superseded。
+> Legacy search -a -e inf retained weak hits, inflating maximum alntmscore and altering OOD counts: TM 0.9 4,827→8,172; TM 0.3 1,610→943 after unification on 2026-08-27. Backup: output/backup_before_foldseek_easysearch_unify/; old output/ood_foldseek_tmscore.csv is provenance only. Local script 10 section is superseded.
 
-### Step 5: 内在无序区域（OOD_IDR，仅 Default 子集）
+### Step 5: Intrinsic disorder for Default samples
 
-**统一工具**：`.skills/ood-annotation-toolkit/scripts/idr_ood.py`（metapredict v3；本任务口径 = `--mode region-ratio --clean map --threshold 0.3`）
+**Tool:** `.skills/ood-annotation-toolkit/scripts/idr_ood.py`, metapredict v 3 with --mode region-ratio --clean map --threshold 0.3.
 
-- 对 test 集所有唯一蛋白序列做残基级 disorder 预测，缓存于 `output/idr_predictions.csv`（7,418 条序列）
-- 非标准氨基酸映射后预测（B→N, Z→Q, J→L, U→C, O→K，其余→A）
-- 单链判定：最长连续 disorder > 0.5 区域长度占序列全长 > 0.3 → IDR-containing（**region-ratio 口径**）
-- **OOD_IDR**：任意一条链为 IDR-containing → `True`
-- 本地 10 号脚本的 IDR 段已标注 superseded
+- Predict disorder for all unique test sequences; cache output/idr_predictions.csv (7,418 sequences).
+- Map nonstandard residues B→N, Z→Q, J→L, U→C, O→K, other→A.
+- A chain is IDR-containing when its longest contiguous disorder>0.5 region occupies >30% of full length (**region-ratio**).
+- Either chain IDR-containing→OOD_IDR=True.
+- Local script 10 IDR section is superseded.
 
-### Step 6: EC 功能 OOD（OOD_NewEC_* / OOD_LongTail_EC_*，仅 Default 子集）
+### Step 6: EC OOD for Default samples
 
-**统一口径**：`.skills/ec-function-ood-annotation` 的批量驱动 `add_unified_newec.py` / `add_unified_longtail_ec.py`
+**Canonical drivers:** `.skills/ec-function-ood-annotation/scripts/add_unified_newec.py` and add_unified_longtail_ec.py.
 
-**EC 收集（双路并集）**：
+Collect EC through two sources:
 
-- **UniProt REST API** 缓存：`scripts/08_fetch_uniprot_ec.py` 产物 `output/uniprot_ec_mapping.csv`（47,059 条）
-- **SIFTS** 链级 EC：`<repo>/data/sifts/sifts_chain_ec.tsv.gz`，按 PDB ID + chain 补充
-- bio/xtal 行：解析 `unique_id` 得 (pdb, chain, uniprot)，取 UniProt 缓存 ∪ SIFTS 链级并集；random 负样本：仅 UniProt 缓存
-- 层级解析：段数 ≥ 3 → L3 取前三段；段数 = 4 → L4 完整编号；允许部分 `-`（如 `3.4.22.-` → L3=`3.4.22`）
+- UniProt REST cache output/uniprot_ec_mapping.csv (47,059 records), from script 08.
+- SIFTS `<repo>/data/sifts/sifts_chain_ec.tsv.gz`, by PDB+chain.
+- bio/xtal: parse unique_id into pdb/chain/uniprot, union cached UniProt and SIFTS ECs. Random negatives: UniProt cache only.
+- L 3 uses first three components when ≥3 exist; L 4 requires four. Partial '-' is allowed: 3.4.22.-→L 3 3.4.22.
 
-**统一口径（all-not-in）**：
-
-| 列 | 参考集 | 判定 |
+| Columns | Reference | Definition |
 |------|--------|------|
-| `OOD_NewEC_L4` / `OOD_NewEC_L3` | train+val 出现的 EC 集合 | 样本有 EC 注释且其**所有** EC（对应层级）均未在参考集出现 → `True`；无注释 → `False` |
-| `OOD_LongTail_EC_L3_le5` / `OOD_LongTail_EC_L3_le10` / `OOD_LongTail_EC_L4_le5` / `OOD_LongTail_EC_L4_le10` | **train** 逐样本频次 | 样本有 EC 注释且其**所有** EC（对应层级）train 频次都 < 5 / < 10（**含 0**）→ `True`；无注释 → `False` |
+| OOD_NewEC_L4/L 3 | Train+val EC union | Annotated and all ECs at the level absent→True; unannotated→False. |
+| OOD_LongTail_EC_L3_le5/le10, L 4_le5/le10 | Training per-sample frequencies | Annotated and every EC frequency <5/<10, including zero→True; unannotated→False. |
 
-> 历史注记：旧列 `OOD_LongTail_EC_L4`（train+val 频次 < 10、any 语义、655 条）已被四列取代并删除；`OOD_NewEC_L4` 由 any 口径（245 条）就地重算为 all-not-in（203 条）。备份：`output/backup_before_newec_unify/`、`output/backup_before_longtail_unify/`、`output/backup_before_longtail_allnotin/`。本地 10 号脚本的 EC 段已标注 superseded。
+> Legacy OOD_LongTail_EC_L4 (train+val frequency<10, any semantics, 655) was removed and replaced by four columns. NewEC_L4 changed any 245→all-not-in 203. Backups: output/backup_before_newec_unify/, backup_before_longtail_unify/, backup_before_longtail_allnotin/. Local script 10 EC section is superseded.
 
-### Step 7: CATH+TED 域标注（OOD_FoldHoldout / OOD_SuperfamilyHoldout，仅 Default 子集）
+### Step 7: CATH+TED holdouts for Default samples
 
-**脚本**：`scripts/11_ted_augment_cath_ood.py`（wrapper：标注 → 对级聚合 → 调 skill 的 `cath_ted_holdout.py` 判定 → 写回 splits）
+**Wrapper:** scripts/11_ted_augment_cath_ood.py: annotate→aggregate pairs→canonical cath_ted_holdout.py→write splits.
 
-**口径**（UniProt accession 模式，**对级**：`protein_A_id` / `protein_B_id` 双方标签取并集）：
+UniProt mode; **pair-level labels union both protein_A_id/protein_B_id**:
 
-- 标签 = CATH v4.4 实验标注（经 SIFTS UniProt→PDB 链反查并集）∪ TED putative 标注（REST API，缓存于项目级 `<repo>/data/ted/ted_api_cache.json`，按全长不过滤；H 级提供 C.A.T.H，T 级仅 C.A.T）
-- 参考集 = **Train** 的 CATH+TED 并集（train/val/test 对称增强；当前参考集 1,262 个 Topology / 4,711 个 Superfamily）
-- any 语义：蛋白对双方并集中任一 Topology / Superfamily 未在参考集出现 → `True`；双方均无注释 → `False`；`Default=False` 行置 NaN
+- Union CATH v 4.4 experimental labels reverse-mapped through SIFTS with putative TED full-length annotations, without overlap filtering. REST cache: `<repo>/data/ted/ted_api_cache.json`. H level provides C.A.T.H; T level C.A.T only.
+- Reference: training CATH+TED union, with symmetric train/val/test augmentation: 1,262 topologies /4,711 superfamilies.
+- Any unseen topology/superfamily in either partner→True; both unannotated→False; Default=False→NaN.
 
-**流程**：
+Workflow:
 
-1. `cath_ted_annotate.py --chains output/ppi_ted_aug_acc_list.csv --out output/ppi_acc_cath_ted_labels.csv --offline`（UniProt 模式，39,455 个 accession 全部缓存命中）
-2. 聚合为对级标签表 `output/ppi_pair_cath_ted_labels.csv`（`unique_id, topos, sfs, split`，样本级标签 = 双方 accession 并集）
-3. `cath_ted_holdout.py --labels <对级标签表> --split-col split --out output/ppi_pair_holdout_flags.csv`（skill 统一判定）
-4. 写回 `splits/ppi_test.csv`（`Default=False` 行置 NaN）
+1. `cath_ted_annotate.py --chains output/ppi_ted_aug_acc_list.csv --out output/ppi_acc_cath_ted_labels.csv --offline`; all 39,455 accessions cached.
+2. Union both partner labels into output/ppi_pair_cath_ted_labels.csv: unique_id, topos, sfs, split.
+3. `cath_ted_holdout.py --labels <pair-label-table> --split-col split --out output/ppi_pair_holdout_flags.csv`.
+4. Write splits/ppi_test.csv; Default=False→NaN.
 
-**标注来源分布**（39,455 个 accession）：both 19,756 / ted-only 14,066 / cath-only 1,365 / none 4,268。Topology 覆盖率：仅 CATH 53.5% → CATH+TED **89.2%**。
+Sources among 39,455 accessions: both 19,756 /ted-only 14,066 /cath-only 1,365 /none 4,268. Topology coverage rises from CATH-only 53.5% to **89.2%**.
 
-**Holdout 结果**（test，Default=True n=14,939）：`OOD_FoldHoldout` 44 条；`OOD_SuperfamilyHoldout` 265 条；双方均无注释样本（→ False）950 条。
+Default test n=14,939: fold44, superfamily265, both unannotated 950 (False).
 
-**输出文件**：`output/ppi_acc_cath_ted_labels.csv`（accession 级标签）、`output/ppi_ted_aug_acc_list.csv`（键清单，历史一次性生成）、`output/ppi_pair_cath_ted_labels.csv` / `output/ppi_pair_holdout_flags.csv`（中间产物）、`output/backup_before_ted_aug/`（更新前备份）。
+Outputs: accession labels output/ppi_acc_cath_ted_labels.csv; historical one-off key list output/ppi_ted_aug_acc_list.csv; pair labels/flags above; backup output/backup_before_ted_aug/.
 
-### Step 8: NaN 惯例与 InD 收尾
+### Step 8: NaN convention and InD
 
-**统一工具**：`.skills/ood-annotation-toolkit/scripts/finalize_ood_columns.py`
+**Tool:** `.skills/ood-annotation-toolkit/scripts/finalize_ood_columns.py`.
 
-- **NaN 惯例**：`Default=False` 行（极端长度预挑出样本）除 `OOD_ExtremeLong`（预挑出原因列）外，**全部** OOD 列均为 NaN（未计算，与 `False` 区分）——包括 `OOD_ExtremeShort` 与搜索型同源列 `seq_Redundancy_*` / `TM-score_*`。备份：`output/backup_before_nondefault_nan/`、`output/backup_before_nondefault_full_nan/`
-- **`InD`**：纯 in-distribution 标识——所有 `OOD_*` + `seq_Redundancy_*` + `TM-score_*` 标记均为 `False`（NaN 视为 `False`）时为 `True`，由 `finalize_ood_columns.py --mode ind` 在所有 OOD 列齐备后重算。当前 **1,944 / 16,264（12.0%）**。备份：`output/backup_before_ind/`
-- 体检：`.skills/ood-annotation-toolkit/scripts/check_splits.py`
+- Default=False: every OOD field is NaN except ExtremeLong, distinguishing not-computed from False. This includes ExtremeShort, sequence, and TM. Backups: output/backup_before_nondefault_nan/ and backup_before_nondefault_full_nan/.
+- InD: all OOD/sequence/TM flags False (NaN treated as False), recomputed with --mode ind after all annotations. **1,944/16,264 (12.0%)**; backup output/backup_before_ind/.
+- Validate using check_splits.py in the same toolkit.
 
-### OOD 统计摘要（以当前 `splits/ppi_test.csv` 实测为准）
+### Measured test OOD counts
 
-test 共 **16,264** 行（正 8,132 / 负 8,132），`Default=True` 14,939 / `Default=False` 1,325。
+16,264 samples: positive 8,132 /negative 8,132; Default 14,939 /nondefault1,325. Unless noted, flags below apply only to Default; nondefault values are NaN.
 
-| OOD 列 | True 数 | 备注 |
+| Column | True | Notes |
 |--------|--------:|------|
-| `seq_Redundancy_90` | 10,655 | 仅 Default 子集，Default=False 行 NaN |
-| `seq_Redundancy_80` | 9,856 | 仅 Default 子集，Default=False 行 NaN |
-| `seq_Redundancy_70` | 9,027 | 仅 Default 子集，Default=False 行 NaN |
-| `seq_Redundancy_60` | 8,098 | 仅 Default 子集，Default=False 行 NaN |
-| `seq_Redundancy_50` | 6,982 | 仅 Default 子集，Default=False 行 NaN |
-| `seq_Redundancy_40` | 5,496 | 仅 Default 子集，Default=False 行 NaN |
-| `seq_Redundancy_30` | 3,653 | 仅 Default 子集，Default=False 行 NaN |
-| `OOD_Orphan` | 3,017 | 仅 Default 子集，Default=False 行 NaN |
-| `TM-score_0.9` | 8,172 | 仅 Default 子集，Default=False 行 NaN |
-| `TM-score_0.8` | 5,345 | 仅 Default 子集，Default=False 行 NaN |
-| `TM-score_0.7` | 3,771 | 仅 Default 子集，Default=False 行 NaN |
-| `TM-score_0.6` | 2,843 | 仅 Default 子集，Default=False 行 NaN |
-| `TM-score_0.5` | 2,186 | 仅 Default 子集，Default=False 行 NaN |
-| `TM-score_0.4` | 1,510 | 仅 Default 子集，Default=False 行 NaN |
-| `TM-score_0.3` | 943 | 仅 Default 子集，Default=False 行 NaN |
-| `OOD_ExtremeShort` | 715 | 仅 Default 子集，Default=False 行 NaN（16 条混合对随之置空） |
-| `OOD_ExtremeLong` | 1,325 | = Default=False 行数（唯一保留的预挑出原因列） |
-| `OOD_IDR` | 3,743 | 仅 Default 子集，Default=False 行 NaN |
-| `OOD_NewEC_L4` | 203 | 仅 Default 子集，Default=False 行 NaN |
-| `OOD_NewEC_L3` | 10 | 仅 Default 子集，Default=False 行 NaN |
-| `OOD_LongTail_EC_L3_le5` | 17 | 仅 Default 子集，Default=False 行 NaN |
-| `OOD_LongTail_EC_L3_le10` | 72 | 仅 Default 子集，Default=False 行 NaN |
-| `OOD_LongTail_EC_L4_le5` | 444 | 仅 Default 子集，Default=False 行 NaN |
-| `OOD_LongTail_EC_L4_le10` | 698 | 仅 Default 子集，Default=False 行 NaN |
-| `OOD_FoldHoldout` | 44 | 仅 Default 子集 |
-| `OOD_SuperfamilyHoldout` | 265 | 仅 Default 子集 |
-| `InD` | 1,944 | 12.0% |
+| seq_Redundancy_90 | 10,655 | Default only |
+| seq_Redundancy_80 | 9,856 | Default only |
+| seq_Redundancy_70 | 9,027 | Default only |
+| seq_Redundancy_60 | 8,098 | Default only |
+| seq_Redundancy_50 | 6,982 | Default only |
+| seq_Redundancy_40 | 5,496 | Default only |
+| seq_Redundancy_30 | 3,653 | Default only |
+| OOD_Orphan | 3,017 | Default only |
+| TM-score_0.9 | 8,172 | Default only |
+| TM-score_0.8 | 5,345 | Default only |
+| TM-score_0.7 | 3,771 | Default only |
+| TM-score_0.6 | 2,843 | Default only |
+| TM-score_0.5 | 2,186 | Default only |
+| TM-score_0.4 | 1,510 | Default only |
+| TM-score_0.3 | 943 | Default only |
+| OOD_ExtremeShort | 715 | Default only; 16 mixed pairs set to NaN |
+| OOD_ExtremeLong | 1,325 | Nondefault count; sole retained pre-reservation reason |
+| OOD_IDR | 3,743 | Default only |
+| OOD_NewEC_L4 | 203 | Default only |
+| OOD_NewEC_L3 | 10 | Default only |
+| OOD_LongTail_EC_L3_le5 | 17 | Default only |
+| OOD_LongTail_EC_L3_le10 | 72 | Default only |
+| OOD_LongTail_EC_L4_le5 | 444 | Default only |
+| OOD_LongTail_EC_L4_le10 | 698 | Default only |
+| OOD_FoldHoldout | 44 | Default only |
+| OOD_SuperfamilyHoldout | 265 | Default only |
+| InD | 1,944 | 12.0% |
 
 ---
 
-## 输出文件汇总
+## Output files
 
 ```
 datasets/ppi_prediction/
-├── DATA_PROCESS.md                      # 本文档
+├── DATA_PROCESS.md                      # This document
 ├── scripts/
-│   ├── 01_fetch_uniprot_sequences.py    # 阶段一：从 UniProt API 获取序列
-│   ├── 02_build_unique_protein_pairs.py # 阶段二：整合所有 split 按蛋白对去重
-│   ├── 03_dedup_by_sequence_identity.py # 阶段三：mmseqs2 95% 序列同一性去重
-│   ├── 04_build_pairs_with_corrected_ranking.py  # 阶段二：修正 representative 选择
-│   ├── 05_fetch_missing_sequences_from_pdb.py    # 阶段一：从 PINDER PDB 回补缺失 UniProt 序列（级联重跑 04/09）
-│   ├── 06_download_structures_and_filter_test.py # 阶段三：单体结构选择、下载与测试集结构过滤
-│   ├── 07_stage_pdbs.py                 # 阶段三：选定结构 staging 到 pdbs/（2026-08 补缺口新增）
-│   ├── 08_fetch_uniprot_ec.py           # 阶段二：UniProt EC 编号缓存
-│   ├── 09_rebuild_with_xtal_negatives.py  # 阶段四：XTAL 难负样本 + 随机补齐 + 时间切分重建 splits
-│   ├── 10_recompute_all_ood.py          # 阶段四：OOD 主体（mmseqs/foldseek/IDR/EC 段 superseded；长度列/Default/NaN 收尾保留）
-│   ├── 11_ted_augment_cath_ood.py       # 阶段四：CATH+TED 域标注（OOD_FoldHoldout / OOD_SuperfamilyHoldout）
-│   └── diag_validate_structures.py      # 诊断：结构完整性校验（不进主流程）
-├── data/                                # 原始数据与任务级缓存
-│   ├── index.parquet / metadata.parquet # PINDER 2024-02 注释表
-│   ├── uniprot_sequences_all.fasta      # 全部蛋白序列
-│   ├── pdb_structures_all/              # 下载的单体 PDB 结构（历史 50,306 个，当前保留 10,690 个，见 3.3）
-│   └── pdb_structures_missing/          # 序列回补用 holo 单体 PDB（3,566 个）
-├── output/                              # 中间结果、缓存与备份
-│   ├── structure_selection.csv          # representative → 单体结构选择（65,214 行）
-│   ├── uniprot_ec_mapping.csv           # UniProt → EC 编号缓存（47,059 条）
-│   ├── idr_predictions.csv              # metapredict IDR 预测缓存（7,418 条序列）
-│   ├── ood_mmseqs_test_vs_trainval_easysearch.m8     # mmseqs2 缓存（skill 格式，可重放）
-│   ├── ood_foldseek_test_vs_trainval_easysearch.m8   # Foldseek 缓存（skill 格式，可重放）
-│   ├── ood_mmseqs_test_vs_trainval.m8 / ood_foldseek_tmscore.csv  # 旧参数缓存（仅供溯源）
-│   ├── ppi_acc_cath_ted_labels.csv      # accession 级 CATH+TED 标签
-│   ├── scripts_archive/                 # 被取代的历史脚本（保留原文件名）
-│   ├── backup_before_*/                 # 各次 splits 写回前备份
-│   └── splits_pre_xtal_backup/          # XTAL 重构前的旧 splits
-├── pdbs/                                # 最终数据集对应的结构文件（46,402 个）
-└── splits/                              # 最终数据集划分文件
-    ├── ppi_train.csv                    # 58,968 行，9 列（无 OOD 列）
-    ├── ppi_val.csv                      # 8,394 行，9 列（无 OOD 列）
-    └── ppi_test.csv                     # 16,264 行，37 列（含全部 OOD 标记）
+│   ├── 01_fetch_uniprot_sequences.py    # Stage 1: UniProt API sequences
+│   ├── 02_build_unique_protein_pairs.py # Stage 2: combine/deduplicate pairs across original splits
+│   ├── 03_dedup_by_sequence_identity.py # Stage 3: mmseqs2 95% identity
+│   ├── 04_build_pairs_with_corrected_ranking.py  # Stage 2: corrected ranking
+│   ├── 05_fetch_missing_sequences_from_pdb.py    # Stage 1: PDB sequence recovery; reruns 04/09
+│   ├── 06_download_structures_and_filter_test.py # Stage 3: select/download monomers, filter test
+│   ├── 07_stage_pdbs.py                 # Stage 3: staging; formalized 2026-08
+│   ├── 08_fetch_uniprot_ec.py           # Stage 2: EC cache
+│   ├── 09_rebuild_with_xtal_negatives.py  # Stage 4: XTAL +random negatives, temporal splits
+│   ├── 10_recompute_all_ood.py          # Stage 4: length/Default/NaN active; other stages superseded
+│   ├── 11_ted_augment_cath_ood.py       # Stage 4: CATH+TED holdouts
+│   └── diag_validate_structures.py      # Diagnostic only
+├── data/                                # Raw data and task caches
+│   ├── index.parquet / metadata.parquet # PINDER 2024-02
+│   ├── uniprot_sequences_all.fasta      # All sequences
+│   ├── pdb_structures_all/              # Downloaded monomers: historically 50,306, now10,690 (§3.3)
+│   └── pdb_structures_missing/          # 3,566 holo monomers for sequence recovery
+├── output/                              # Intermediates, caches, backups
+│   ├── structure_selection.csv          # 65,214 representative-to-monomer mappings
+│   ├── uniprot_ec_mapping.csv           # 47,059 EC entries
+│   ├── idr_predictions.csv              # 7,418 sequence predictions
+│   ├── ood_mmseqs_test_vs_trainval_easysearch.m8     # Replayable canonical mmseqs cache
+│   ├── ood_foldseek_test_vs_trainval_easysearch.m8   # Replayable canonical Foldseek cache
+│   ├── ood_mmseqs_test_vs_trainval.m8 / ood_foldseek_tmscore.csv  # Legacy provenance only
+│   ├── ppi_acc_cath_ted_labels.csv      # Accession-level labels
+│   ├── scripts_archive/                 # Historical scripts, original filenames retained
+│   ├── backup_before_*/                 # Split backups before updates
+│   └── splits_pre_xtal_backup/          # Pre-XTAL splits
+├── pdbs/                                # 46,402 final structure files
+└── splits/
+    ├── ppi_train.csv                    # 58,968 rows, nine columns, no OOD
+    ├── ppi_val.csv                      # 8,394 rows, nine columns, no OOD
+    └── ppi_test.csv                     # 16,264 rows, 37 columns with all OOD
 ```
 
-**列说明**（train/val/test 共有）：
+Shared columns:
 
-| 列 | 说明 |
+| Column | Description |
 |------|------|
-| `unique_id` | 蛋白对唯一 ID（bio/xtal 为 PINDER representative_id，随机负样本为 `neg_xxxx`） |
-| `protein_A_id` / `protein_B_id` | 两条链的 UniProt ID |
-| `aa_seq1` / `aa_seq2` | 两条链的氨基酸序列 |
-| `struct_file1` / `struct_file2` | 两条链对应的单体 PDB 文件名（仅文件名，位于 `pdbs/`） |
-| `label` | 样本级标签，`1`=相互作用，`0`=无相互作用 |
-| `pair_type` | 样本类型（`bio` / `xtal` / `random`） |
+| unique_id | PINDER representative_id for bio/xtal; neg_xxxx for random pairs |
+| protein_A_id /protein_B_id | UniProt IDs |
+| aa_seq1 /aa_seq2 | Amino-acid sequences |
+| struct_file1 /struct_file2 | Monomer filenames only, under pdbs/ |
+| label | Pair-level 1 interaction /0 non-interaction |
+| pair_type | bio /xtal /random |
 
-**`splits/ppi_test.csv` 完整列清单**（37 列，以实际表头为准）：
+Full test header (37 columns; actual file authoritative):
 
 ```
 unique_id, protein_A_id, protein_B_id, aa_seq1, aa_seq2,
@@ -414,46 +405,40 @@ OOD_NewEC_L3, InD
 
 ---
 
-## 数据质量检查
+## Quality checks
 
-1. **泄露检查**：Train ∩ Val、Train ∩ Test、Val ∩ Test 的 `unique_id` 交集均为空（已核对，0 重叠）；随机负样本排除了 `output/ppi_unique_pairs.csv` 中全部已知 BIO/XTAL 蛋白对。
-2. **分布一致性**：三个 split 正负样本严格 1:1；负样本中 XTAL 占比 train 34.9% / val 50.1% / test 48.5%（XTAL 数量受时间段内可得性限制，不足部分由随机配对补齐）。
-3. **长度约束**：划分前全局剔除任一链 > 2,000 的样本；train/val 单链 ≤ 1,000；test 保留 > 1,000 样本并标记 `OOD_ExtremeLong` / `Default=False`。
-4. **结构完整性**：`data/pdb_structures_all/` 下载的 50,306 个 PDB 全部通过 Bio.PDB 解析校验（诊断脚本 `diag_validate_structures.py`）。
-5. **序列覆盖率**：99.999%（仅 1 条样本因序列缺失被过滤）。
-6. **splits 写回验证**：历次 OOD 列重算/追加均核对行数、列序、`unique_id` 与备份一致（备份见 `output/backup_before_*/`）。
-7. **pdbs/ 清单验证（2026-08）**：`07_stage_pdbs.py --dry-run` 期望清单（当前 splits 44,178 ∪ pre-XTAL 2,224 = 46,402）与 `pdbs/` 实际文件清单双向 diff 为 0。
+1. Pairwise split unique_id intersections are zero; random negatives exclude all known BIO/XTAL pairs in output/ppi_unique_pairs.csv.
+2. Each split is exactly1:1 positive/negative. Negative XTAL fractions: train 34.9% /val 50.1% /test 48.5%, limited by period-specific availability; random pairs fill deficits.
+3. Remove chains >2,000 globally before splitting; train/val chains ≤1,000; longer test chains remain as ExtremeLong/Default=False.
+4. All50,306 downloaded PDBs pass Bio.PDB parsing diagnostics.
+5. Sequence coverage 99.999%; one sample removed.
+6. OOD updates preserve row counts, column order, and unique_id relative to backups in output/backup_before_*/.
+7. Staging audit, 2026-08: expected current 44,178 plus historical 2,224 =46,402 matches pdbs/ in both directions.
 
----
+## Diagnostic tools
 
-## 诊断与质控工具
-
-| 脚本 | 用途 |
+| Script | Purpose |
 |------|------|
-| `scripts/diag_validate_structures.py` | Bio.PDB 解析校验 `data/pdb_structures_all/` 全部 PDB 文件（空文件 / 无 ATOM / 解析错误），产出 `output/structure_validation_summary.json` 与失败清单 |
+| scripts/diag_validate_structures.py | Check empty/no-ATOM/unparseable files in data/pdb_structures_all/; write summary JSON and failures. |
 
----
+## Archived scripts: output/scripts_archive/
 
-## 归档清单（`output/scripts_archive/`）
-
-| 脚本 | 归档原因 |
+| Scripts | Reason |
 |------|----------|
-| `02_build_ppi_pairs.py` / `03_dedup_ppi_pairs.py` | 初版配对/去冗余，已被 02/03 取代 |
-| `06_build_pairs_with_custom_ranking.py` | 自定义 ranking 试验版，已被 04（修正口径）取代 |
-| `07_build_negative_pairs.py` / `08_time_split_dataset.py` | 旧负样本/时间划分链路，已被 09 取代（05 的级联重跑链已同步改为 04 → 09） |
-| `15_mark_ood.py` / `17_build_ood_splits.py` / `18_compute_ood_idr.py` / `19_compute_ec_ood.py` / `22_recompute_homology_newfold_ood.py` | 分散的旧 OOD 脚本，已被 10 一站式重算 + skill 统一口径取代 |
-| `16_fix_negative_structure_labels.py` / `20_add_pdb_file_columns.py` | 一次性列修复，修复已落数据 |
-| `21_resample_negative_pairs.py` | 纯随机负样本旧方案（homodimer shortcut），已被 09 的 XTAL+随机补齐取代 |
+| 02_build_ppi_pairs.py /03_dedup_ppi_pairs.py | Initial pairing/deduplication replaced by 02/03 |
+| 06_build_pairs_with_custom_ranking.py | Experimental ranking replaced by corrected04 |
+| 07_build_negative_pairs.py /08_time_split_dataset.py | Replaced by 09; script 05 cascade updated to 04→09 |
+| 15_mark_ood.py /17_build_ood_splits.py /18_compute_ood_idr.py /19_compute_ec_ood.py /22_recompute_homology_newfold_ood.py | Dispersed OOD implementations replaced by 10 plus canonical skills |
+| 16_fix_negative_structure_labels.py /20_add_pdb_file_columns.py | One-off column repairs already applied |
+| 21_resample_negative_pairs.py | Random-only negatives with homodimer shortcut replaced by XTAL+random 09 |
 
----
+## Notes
 
-## 注意事项
-
-1. **与 `ppis_prediction/` 的区别**：`ppis_prediction/` 面向**结合界面预测**（残基级标签），`ppi_prediction/` 面向**蛋白对相互作用预测**（样本级二分类）。
-2. **分辨率代理**：PINDER 元数据仅含 holo 复合物分辨率，representative 选择暂以 holo 分辨率作为 apo/predicted 质量的代理；解析 apo 真实分辨率与 AlphaFold pLDDT 是后续改进项。
-3. **`Default` 口径**：本任务 `Default=False` 仅由 `OOD_ExtremeLong` 触发（1,325 行），极端长度样本只做标记、不从任何 split 剔除。`Default=False` 行仅保留 `OOD_ExtremeLong`，其余全部 OOD 列（含 `seq_Redundancy_*` / `TM-score_*` / `OOD_ExtremeShort`）按 NaN 惯例置空——与其他任务 Default=False 行口径统一。
-4. **结构搜索/序列搜索口径**：2026-08-27 起 mmseqs2 与 foldseek 均统一为 easy-search（skill 脚本重算写回）；本地 10 号脚本对应段落已标注 superseded，旧缓存仅供溯源。
-5. **EC 口径**：`OOD_NewEC_*` / `OOD_LongTail_EC_*` 统一为 all-not-in（NewEC 参考 train+val，LongTailEC 参考 train 频次且含 0），旧 `OOD_LongTail_EC_L4`（655 条）已删除；统一口径由 `.skills/ec-function-ood-annotation` 的批量驱动脚本落盘。
-6. **TED API 逗号分隔双标签**（foldseek/foldclass）已按并集解析，无逗号伪标签残留；TED 缓存全部命中，标注过程离线可复现。
-7. **`data/pdb_structures_all/` 现状（2026-08 核实）**：目录当前仅保留 10,690 个 PDB（含 6,786 个 splits 引用文件与 3,904 个选定但从未被任何 splits 版本引用的文件），多数历史文件已移出；`pdbs/`（46,402 个）为最终权威结构目录。全新环境重放 staging 前需先重跑 06 重新下载。
-8. **历史 splits 依赖**：`07_stage_pdbs.py` 的完整 46,402 文件清单包含 `output/splits_pre_xtal_backup/` 引用的 2,224 个历史文件；删除该备份目录后 staging 只能复现当前 splits 引用的 44,178 个文件。
+1. **PPI versus PPIS:** PPIS predicts residue interfaces; PPI predicts interaction for a protein pair.
+2. **Resolution proxy:** metadata supplies holo resolution only. Ranking uses this for apo/predicted quality; actual apo resolution and AlphaFold pLDDT remain future improvements.
+3. **Default:** only ExtremeLong triggers Default=False (1,325). Extreme-length samples are flagged, not removed at this step. Preserve only ExtremeLong and set all other OOD/sequence/TM/ExtremeShort fields to NaN.
+4. **Homology:** since 2026-08-27, mmseqs2 and Foldseek use canonical skill easy-search. Local10 sections are superseded; old caches are provenance only.
+5. **EC:** all-not-in; NewEC uses train+val, LongTail uses train frequency including 0. Legacy single LongTail_L4 (655) removed; canonical skill drivers write current columns.
+6. **TED dual labels:** comma-separated foldseek/foldclass labels are unioned; no comma-containing pseudo-labels remain. All TED cache entries hit; annotation reproduces offline.
+7. **Current raw-structure cache, audited2026-08:** 10,690 PDBs remain: 6,786 split references plus3,904 selected files never referenced by any split version. Most historical files moved elsewhere. pdbs/ with 46,402 files is authoritative; rerun06 before fresh staging.
+8. **Historical dependency:** the complete46,402 staging list includes2,224 pre-XTAL references. Without output/splits_pre_xtal_backup/, only 44,178 current-reference files reproduce.

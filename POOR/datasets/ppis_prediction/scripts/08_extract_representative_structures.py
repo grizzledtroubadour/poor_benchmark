@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-从原始 pair 文件中为每条代表链提取一个代表性结构。
+Extract one representative structure per representative chain from original pair files.
 
-确保 8,850 条去冗余后的代表链都有对应的 PDB 结构文件。
+Ensure all 8,850 deduplicated representative chains have corresponding PDB structures.
 
-步骤：
-1. 从 chain_centric_dedup_metadata.csv 读取 8,850 条代表链的 seq_hash 与序列。
-2. 重新扫描 42,112 条 pair 元数据，为每条唯一序列建立原子数最多的最佳出现
+Steps:
+1. Read seq_hash and sequences for 8,850 representatives from chain_centric_dedup_metadata.csv.
+2. Rescan 42,112 pair metadata records to find the occurrence with the most atoms per sequence
    （seq_hash -> (unique_id, role)）。
-3. 对每个代表链，加载对应 pair 文件的 df0/df1，**按序列匹配**选择与目标序列
-   对应的 df（DIPS-Plus pair 文件中 df0/df1 与 receptor/ligand 可能互换，
-   不能按 role 直取——该逻辑原属一次性补丁 fix_representative_structures.py，
-   已融入本脚本；其 resname 列格式 bug 不带入，见 df_to_pdb 注释），
-   提取坐标写入单链 PDB（统一链 ID "A"）。
+3. Load df0/df1 for each representative's pair and select the DataFrame by sequence matching.
+                  DIPS-Plus df0/df1 may be swapped relative to receptor/ligand metadata,
+                  so role alone is unsafe. This incorporates the former fix_representative_structures.py patch,
+                  excluding its resname-format bug; see df_to_pdb comments.
+                  Write single-chain coordinates with chain ID "A".
 
-输出：
+Output:
     pdbs/{seq_hash}.pdb
-    output/chain_centric_dedup_metadata.csv（回填结构来源字段）
+                        output/chain_centric_dedup_metadata.csv (filled structure-source fields)
 """
 
 import argparse
@@ -61,7 +61,7 @@ def load_csv(path):
 
 
 def load_pair(file_path):
-    """加载 HDF5/dill pair 文件，返回 (df0, df1)。"""
+    """Load an HDF5/dill pair and return (df0, df1)."""
     data = hickle.load(str(file_path))
     if isinstance(data, (list, tuple)) and len(data) >= 3:
         return data[1], data[2]
@@ -69,7 +69,7 @@ def load_pair(file_path):
 
 
 def df_to_pdb(df, out_path, chain_id="A"):
-    """将原子 DataFrame 写入 PDB 文件。"""
+    """Write an atom DataFrame as a PDB."""
     records = []
     atom_idx = 1
     for _, row in df.iterrows():
@@ -95,8 +95,8 @@ def df_to_pdb(df, out_path, chain_id="A"):
         if resseq > 9999:
             resseq = 9999
 
-        # resseq 之后必须留 4 列（iCode col 27 + 空白 cols 28-30），使 x 落在
-        # 标准 cols 31-38；少一列会把坐标整体左移（负坐标百位会丢失负号）。
+        # Keep four columns after resseq (iCode column 27 and blanks 28–30), placing x in
+        # standard columns 31–38. One missing column shifts coordinates left and loses minus signs.
         line = (
             f"ATOM  {atom_idx:5d} {atom_name_fmt} {resname_fmt} {chain_id}{resseq:4d}    "
             f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {element:>2s}  \n"
@@ -114,7 +114,7 @@ def df_to_pdb(df, out_path, chain_id="A"):
 
 
 def extract_sequence_from_df(df):
-    """从原子 DataFrame 中提取氨基酸序列（CA 原子、按 residue 去重排序）。"""
+    """Extract the amino-acid sequence from CA atoms, deduplicated and sorted by residue."""
     RESIDUE_3TO1 = {
         "ALA": "A", "CYS": "C", "ASP": "D", "GLU": "E", "PHE": "F",
         "GLY": "G", "HIS": "H", "ILE": "I", "LYS": "K", "LEU": "L",
@@ -129,11 +129,11 @@ def extract_sequence_from_df(df):
 
 
 def select_chain_df(df0, df1, target_seq):
-    """按序列匹配选择与目标序列对应的 df。
+    """Select the DataFrame corresponding to the target sequence.
 
-    DIPS-Plus pair 文件中 df0/df1 与元数据 receptor/ligand 的对应关系可能
-    互换，必须按序列内容选择：完全匹配优先，其次唯一长度匹配，最后按序列
-    相似度。返回 (df, matched_role)。
+    DIPS-Plus df0/df1 may be swapped relative to receptor/ligand metadata.
+    Select by exact sequence first, unique length second, and sequence similarity last.
+    Return (df, matched_role).
     """
     seq0 = extract_sequence_from_df(df0)
     seq1 = extract_sequence_from_df(df1)
@@ -162,7 +162,7 @@ def select_chain_df(df0, df1, target_seq):
 
 
 def find_best_occurrences(metadata):
-    """为每个唯一序列找到坐标最完整的出现（原子数最多）。"""
+    """Find the most complete coordinate occurrence (most atoms) for each unique sequence."""
     best_occurrence = {}
     for row in metadata:
         uid = row["unique_id"]
@@ -196,7 +196,7 @@ def find_best_occurrences(metadata):
 
 
 def extract_structure_for_rep(rep_info, occurrence_map):
-    """为代表链提取结构，返回 (rep_hash, status, occurrence_info)。"""
+    """Extract a representative structure; return (rep_hash, status, occurrence_info)."""
     rep_hash = rep_info["seq_hash"]
     target_seq = rep_info.get("sequence", "")
     out_path = REP_STRUCT_DIR / f"{rep_hash}.pdb"
@@ -214,15 +214,15 @@ def extract_structure_for_rep(rep_info, occurrence_map):
     except Exception as e:
         return rep_hash, f"load_error: {e}", occ
 
-    # 按序列匹配选 df（df0/df1 与 receptor/ligand 可能互换）
+    # Select by sequence because df0/df1 may be swapped relative to receptor/ligand.
     if target_seq:
         df, matched_role = select_chain_df(df0, df1, target_seq)
-    else:  # 元数据缺序列时回退到按 role 直取
+    else:  # Fallback to the role when sequence metadata is unavailable.
         df = df0 if occ["role"] == "receptor" else df1
         matched_role = "by_role_fallback"
 
     try:
-        # 如果是已存在的符号链接或文件，先删除
+        # Remove existing symlinks or files first.
         if out_path.is_symlink() or out_path.exists():
             out_path.unlink()
         df_to_pdb(df, out_path, chain_id="A")
@@ -274,16 +274,16 @@ def main():
         for h, s in failed[:20]:
             logger.warning("Failed %s: %s", h, s)
 
-    # 更新 dedup metadata 中的结构路径
+    # Update structure paths in deduplicated metadata.
     update_metadata_paths(results)
 
 
 def update_metadata_paths(results):
-    """更新 chain_centric_dedup_metadata.csv 中的结构路径为实际 PDB 文件。"""
+    """Update chain_centric_dedup_metadata.csv with actual PDB paths."""
     in_path = OUTPUT_DIR / "chain_centric_dedup_metadata.csv"
     rows = load_csv(in_path)
 
-    # 构建 hash -> 最新结构来源信息
+    # Map hashes to the latest structure-source information.
     hash_to_occ = {}
     for rep_hash, status, occ in results:
         if status == "ok" and occ is not None:

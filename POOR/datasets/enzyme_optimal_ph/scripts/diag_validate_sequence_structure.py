@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-序列-结构一致性验证
-- 从 .cif 或 .pdb 结构文件中提取氨基酸序列
-- 与 metadata.csv 中的 uniprot_seq_cut 做全局比对（edlib NW）
-- 计算 identity 与 coverage
+Sequence–structure consistency validation
+- Extract amino-acid sequences from .cif or .pdb structures.
+- Globally align with metadata.csv uniprot_seq_cut using edlib NW.
+- Compute identity and coverage.
 """
 import os
 import re
@@ -44,7 +44,7 @@ cif_parser = MMCIFParser(QUIET=True)
 
 
 def extract_seq_from_structure(struct_path):
-    """从单个结构文件中提取第一条链的氨基酸序列"""
+    """Extract the first-chain amino-acid sequence from one structure file."""
     ext = struct_path.suffix.lower()
     try:
         if ext == ".cif":
@@ -60,12 +60,12 @@ def extract_seq_from_structure(struct_path):
     for model in structure:
         for chain in model:
             for residue in chain:
-                if residue.id[0].strip():  # 跳过异质残基（HETATM）
+                if residue.id[0].strip():  # Skip heterogeneous residues (HETATM).
                     continue
                 resname = residue.resname.upper()
                 if resname in AA3_TO_1:
                     residues.append(AA3_TO_1[resname])
-            # 只取第一条链
+            # Use the first chain only.
             break
         break
 
@@ -77,12 +77,12 @@ def extract_seq_from_structure(struct_path):
 
 
 def clean_seq(seq):
-    """只保留标准 20 种氨基酸"""
+    """Keep only the 20 standard amino acids."""
     return re.sub(r"[^ACDEFGHIKLMNPQRSTVWY]", "", seq.upper())
 
 
 def align_sequences(struct_seq, meta_seq):
-    """使用 edlib 全局比对，返回 identity 和 coverage"""
+    """Globally align with edlib and return identity and coverage."""
     struct_seq = clean_seq(struct_seq)
     meta_seq = clean_seq(meta_seq)
 
@@ -96,12 +96,12 @@ def align_sequences(struct_seq, meta_seq):
     query_aligned = alignment["query_aligned"]
     target_aligned = alignment["target_aligned"]
 
-    # identity: 匹配位置数 / 比对长度（含 gap）
+    # Identity: matching positions / alignment length, including gaps.
     matches = sum(1 for q, t in zip(query_aligned, target_aligned) if q == t and q != "-")
     align_len = len(query_aligned)
     identity = matches / align_len if align_len > 0 else 0.0
 
-    # coverage: 结构序列长度 / 元数据序列长度
+    # Coverage: structure sequence length / metadata sequence length.
     coverage = len(struct_seq) / len(meta_seq) if len(meta_seq) > 0 else 0.0
 
     return round(identity, 4), round(coverage, 4)
@@ -109,7 +109,7 @@ def align_sequences(struct_seq, meta_seq):
 
 def process_one(args):
     uniprot_id, meta_seq = args
-    # 优先尝试 cif，再尝试 pdb
+    # Prefer cif; fall back to pdb.
     cif_path = CIF_DIR / f"{uniprot_id}.cif"
     pdb_path = PDB_DIR / f"{uniprot_id}.pdb"
 

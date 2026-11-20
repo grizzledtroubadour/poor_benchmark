@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""为 ligand_binding_site test 集追加 OOD_FoldHoldout / OOD_SuperfamilyHoldout（CATH+TED 口径）。
+"""Add CATH+TED OOD_FoldHoldout / OOD_SuperfamilyHoldout to ligand_binding_site test.
 
-链清单为 output/lbs_ted_aug_chain_list.csv（历史一次性生成，生成脚本已删除；
-unique_id 前两段为 pdb/chain）。
-样本粒度：链级（同一链的不同配体样本共享同一标注）。
-口径：CATH 优先 + TED 并集补缺、50% 域重叠过滤、train-only 对称参考、any 语义、
-无注释 -> False、Default=False（极端长度）行 -> NaN。
+Chain list: output/lbs_ted_aug_chain_list.csv, historically generated once by a deleted script;
+the first two unique_id components identify pdb/chain.
+Annotation unit: chain; different ligand samples of one chain share annotations.
+CATH priority + TED union gap filling, 50% domain overlap, symmetric training-only reference, any semantics;
+unannotated -> False; Default=False extreme-length rows -> NaN.
 
-Holdout 判定统一调用 `.skills/cath-ted-domain-annotation/scripts/cath_ted_holdout.py`
-（参考集范围、any 语义、无注释 -> False 等口径以该脚本为唯一实现）。
+Holdout decisions use .skills/cath-ted-domain-annotation/scripts/cath_ted_holdout.py,
+the sole canonical implementation of reference scope, any semantics, and unannotated -> False.
 """
 import subprocess
 import sys
@@ -28,17 +28,17 @@ TEST_CSV = TASK_DIR / "splits/ligand_binding_site_test.csv"
 
 FLAG_COLS = ["OOD_FoldHoldout", "OOD_SuperfamilyHoldout"]
 
-# 1) 链级 CATH+TED 标注（train/val/test 对称增强）
+# 1. Chain-level CATH+TED annotation with symmetric train/val/test augmentation.
 subprocess.run([sys.executable, str(ANNOTATE), "--chains", str(CHAIN_LIST),
                 "--out", str(LABELS), "--domains-out", str(DOMAINS), "--offline"],
                check=True)
 
-# 2) Holdout 判定（skill 唯一实现：train-only 参考、any 语义、无注释 -> False）
+# 2. Canonical holdout implementation: training-only reference, any semantics, unannotated -> False.
 subprocess.run([sys.executable, str(HOLDOUT), "--labels", str(LABELS),
                 "--split-col", "splits", "--out", str(FLAGS)],
                check=True)
 
-# 3) 写回 splits：仅覆写两列，Default=False（极端长度）行置 NaN
+# 3. Update only two split columns; Default=False extreme-length rows receive NaN.
 flags = pd.read_csv(FLAGS, dtype=str, keep_default_na=False)
 flag_map = flags.set_index("unique_id")[FLAG_COLS].to_dict("index")
 
@@ -65,7 +65,7 @@ for idx, r in test.iterrows():
     n_f += fh == "True"
     n_s += sh == "True"
 
-# 无注释链数（-> False）从 holdout 输出旁证统计
+# Count unannotated chains (False) from holdout outputs as supporting evidence.
 labels = pd.read_csv(LABELS, dtype=str, keep_default_na=False)
 test_labels = labels[labels["splits"].str.split(";").apply(lambda xs: "test" in xs)]
 n_un = int(((test_labels["topos"] == "") & (test_labels["sfs"] == "")).sum())

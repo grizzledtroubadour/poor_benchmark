@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-计算 pH 值域长尾 OOD 标记：
-- OOD_LongTail_pHbin_le50 / OOD_LongTail_pHbin_le100：Default 测试样本的
-  pH 落在训练集低频区间（bin 宽 0.5，范围 [1.5, 13.5)，阈值 <= 50 / <= 100）
+Compute pH-bin long-tail OOD flags:
+- OOD_LongTail_pHbin_le50 / OOD_LongTail_pHbin_le100: Default test samples whose
+  pH bin has low training frequency (width 0.5, range [1.5,13.5), counts <=50 / <=100).
 
-注意：这些 OOD 标记仅针对 Default 测试样本计算；Default=False（极端长度）行
-在本脚本内直接写 NaN（空单元格，"未计算"语义，全项目统一惯例）。
-finalize_ood_columns.py --mode nan 仅作兜底校验，不再承担 NaN 化职责。
+These flags apply only to Default test samples. Default=False extreme-length rows
+receive NaN (empty cells: not computed), following project convention.
+finalize_ood_columns.py --mode nan is only a fallback check.
 
-历史注记：本脚本抽取自已归档的 compute_additional_ood.py 的 pHbin 部分；
-原脚本的 EC 口径列（OOD_NewFunction / OOD_LongTailFunction_*）已被
-ec-function-ood-annotation skill 的统一口径（OOD_NewEC_* / OOD_LongTail_EC_*）取代。
-统一复算工具见 .skills/ood-annotation-toolkit/scripts/value_bin_longtail_ood.py。
+Historical note: extracted from the pHbin section of archived compute_additional_ood.py.
+Its legacy EC columns (OOD_NewFunction / OOD_LongTailFunction_*) were replaced by
+ec-function-ood-annotation skill columns (OOD_NewEC_* / OOD_LongTail_EC_*).
+Canonical recomputation tool: .skills/ood-annotation-toolkit/scripts/value_bin_longtail_ood.py.
 """
 import argparse
 import json
@@ -33,7 +33,7 @@ THRESHOLDS = (50, 100)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="计算 OOD_LongTail_pHbin_* 标记")
+    parser = argparse.ArgumentParser(description="Compute OOD_LongTail_pHbin_* flags")
     parser.add_argument("--train", type=Path, default=TRAIN_PATH)
     parser.add_argument("--test", type=Path, default=TEST_PATH)
     parser.add_argument("--summary", type=Path, default=SUMMARY_PATH)
@@ -46,7 +46,7 @@ def main():
     train_ph = pd.to_numeric(train["label"], errors="coerce")
     test_ph = pd.to_numeric(test["label"], errors="coerce")
 
-    # 使用 0.5 为间隔的 pH 区间
+    # Use pH intervals of width 0.5.
     train_bin = pd.cut(train_ph, bins=BIN_EDGES)
     test["_ph_bin"] = pd.cut(test_ph, bins=BIN_EDGES)
     bin_counts = train_bin.value_counts().to_dict()
@@ -55,20 +55,20 @@ def main():
 
     for thr in THRESHOLDS:
         col = f"OOD_LongTail_pHbin_le{thr}"
-        # Default=False 行直接写 NaN（空），Default 行写 True/False
+        # Default=False rows receive empty/NaN; Default rows receive True/False.
         test[col] = ""
         test.loc[mask_default, col] = test.loc[mask_default, "_ph_bin"].apply(
             lambda x: "True" if (pd.notna(x) and bin_counts.get(x, 0) <= thr) else "False"
         )
 
-    # 删除临时列（ph_bin 为区间类型，不能保留在最终 splits 中）
+    # Drop temporary ph_bin intervals, which must not remain in final splits.
     test = test.drop(columns=["_ph_bin"])
 
-    # 保存
+    # Save.
     test.to_csv(args.test, index=False, lineterminator="\n")
     print(f"[INFO] Updated {args.test}")
 
-    # 更新摘要
+    # Update summary.
     if args.summary.exists():
         with open(args.summary) as f:
             summary = json.load(f)

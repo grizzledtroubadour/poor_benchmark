@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """Stage selected monomer structures from data/pdb_structures_all/ into pdbs/.
 
-补缺口脚本（2026-08 新增）：pdbs/ 目录历史上由 splits 引用的结构文件从
-data/pdb_structures_all/ 复制而来，当时无独立脚本。本脚本固化该步骤：
+Reconstruct a missing step (added 2026-08): pdbs/ was historically populated by copying
+split-referenced files from data/pdb_structures_all/ without a standalone script. This formalizes it.
 
-需要的文件清单 =
-    splits/ppi_{train,val,test}.csv 的 struct_file1 / struct_file2 并集
-    （struct_file 列由 09_rebuild_with_xtal_negatives.py 按
-      output/structure_selection.csv 的选定结构生成）
-  ∪ output/splits_pre_xtal_backup/（XTAL 重构前历史 splits）引用文件
-    （默认包含，可用 --no-pre-xtal 关闭；现有 pdbs/ 共 46,402 个文件
-      = 当前 splits 引用 44,178 ∪ pre-XTAL 历史引用 2,224）
+Required files =
+            union of struct_file1 / struct_file2 in splits/ppi_{train,val,test}.csv
+            (09_rebuild_with_xtal_negatives.py generates these fields from selected structures in
+                  output/structure_selection.csv)
+      union files referenced by output/splits_pre_xtal_backup/ (historical pre-XTAL splits)
+            (included by default; disable with --no-pre-xtal). Existing pdbs/ has 46,402 files:
+                  44,178 current references plus 2,224 historical pre-XTAL references.
 
-复制规则（幂等）：
-  - 目标已存在 → 跳过；
-  - 源文件存在 → 复制；
-  - 源文件缺失 → 记入 missing 清单（当前 data/pdb_structures_all/ 仅保留
-    10,690 个文件，多数历史文件已移出；全新环境重放需先运行
-    06_download_structures_and_filter_test.py 重新下载全部 50,306 个选定结构）。
+Idempotent copy rules:
+      - Destination exists: skip.
+      - Source exists: copy.
+      - Source missing: record in missing list. data/pdb_structures_all/ now retains only
+            10,690 files; most historical files were moved elsewhere. For fresh reproduction, run
+            06_download_structures_and_filter_test.py to redownload all 50,306 selected structures.
 
-用法：
-  python 07_stage_pdbs.py                      # 幂等 staging 到 pdbs/
-  python 07_stage_pdbs.py --dry-run            # 只统计期望清单与缺失，不写文件
-  python 07_stage_pdbs.py --dest DIR [--limit N]  # 重定向目标（验证用）
+Usage:
+  python 07_stage_pdbs.py                      # Idempotent staging into pdbs/.
+  python 07_stage_pdbs.py --dry-run            # Report expected and missing files without writing.
+  python 07_stage_pdbs.py --dest DIR [--limit N]  # Redirect destination for validation.
 """
 import argparse
 import json
@@ -75,12 +75,12 @@ def collect_needed_files(include_pre_xtal):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--src", type=str, default=str(SRC_DIR), help="源结构目录")
-    parser.add_argument("--dest", type=str, default=str(DEST_DIR), help="目标目录（默认 pdbs/）")
+    parser.add_argument("--src", type=str, default=str(SRC_DIR), help="Source structure directory")
+    parser.add_argument("--dest", type=str, default=str(DEST_DIR), help="Destination directory (default pdbs/)")
     parser.add_argument("--no-pre-xtal", action="store_true",
-                        help="不包含 pre-XTAL 历史 splits 引用的文件")
-    parser.add_argument("--dry-run", action="store_true", help="只统计，不复制")
-    parser.add_argument("--limit", type=int, default=0, help="最多复制 N 个文件（验证用，0=不限）")
+                        help="Exclude files referenced by historical pre-XTAL splits")
+    parser.add_argument("--dry-run", action="store_true", help="Report counts only; do not copy")
+    parser.add_argument("--limit", type=int, default=0, help="Copy at most N files for validation (0=unlimited)")
     args = parser.parse_args()
 
     src = Path(args.src)

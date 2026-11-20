@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
-脚本：08_cluster_time_split.py
-用途：
-  1. 按 ECFP4 Tanimoto >= 0.6 对样本进行团划分聚类（同一簇内两两相似度均 >= 0.6）
-  2. 每个簇按 release_year 进行 7:1:2 时间划分
-  3. 检查 val/test 中是否存在与训练集最大相似度 < 0.6 的样本，将其移入 train
-  4. 比例平衡（已并入原 12_balance_val_from_test.py / 13_adjust_val_to_train_9to1.py）：
-     - 兜底过滤后 test 占比偏高、val 偏低，先将 test 中按时间最早的 1/3 样本移入 val；
-     - 再将 val 中按时间最早的 m 个样本移入 train，使 train:val ≈ 9:1
+Script: 08_cluster_time_split.py
+Purpose:
+  1. Partition samples into cliques with pairwise ECFP4 Tanimoto >= 0.6.
+  2. Split each cluster chronologically by release_year in a 7:1:2 ratio.
+  3. Move val/test samples with maximum training similarity <0.6 into train.
+  4. Balance ratios (incorporating the former 12_balance_val_from_test.py / 13_adjust_val_to_train_9to1.py):
+     - After fallback filtering, test is oversized and val undersized; move the earliest third of test to val.
+     - Then move the earliest m val samples to train to obtain train:val ≈ 9:1.
        （m = round((9V - T) / 10)）。
 
-使用：
+Usage:
     cd ligand_binding_affinity/
     python scripts/08_cluster_time_split.py
 
-输入：
+Input:
     output/pdbbind_v2020_dataset.csv
 
-输出：
+Output:
     splits/train.csv
     splits/val.csv
     splits/test.csv
@@ -45,13 +45,13 @@ def fp_from_on_bits(on_bits):
 
 def clique_partition(fps, threshold=SIM_THRESHOLD):
     """
-    贪心团划分：将样本划分成若干簇，保证每个簇内任意两个样本相似度 >= threshold。
-    返回簇列表，每个簇是样本索引列表。
+    Greedy clique partition: every pair within a cluster has similarity >= threshold.
+    Return a list of clusters, each containing sample indices.
     """
     n = len(fps)
     neighbors = [set() for _ in range(n)]
 
-    print(f"[聚类] 计算 {n} x {n} 相似度矩阵（阈值 {threshold}）...")
+    print(f"[Clustering] Computing {n} x {n} similarity matrix (threshold {threshold})...")
     for i in range(n):
         sims = DataStructs.BulkTanimotoSimilarity(fps[i], fps[i + 1:])
         for offset, sim in enumerate(sims):
@@ -60,12 +60,12 @@ def clique_partition(fps, threshold=SIM_THRESHOLD):
                 neighbors[i].add(j)
                 neighbors[j].add(i)
         if (i + 1) % 1000 == 0:
-            print(f"[聚类] 已处理 {i + 1}/{n} 个样本")
+            print(f"[Clustering] Processed {i + 1}/{n} samples")
 
     unassigned = set(range(n))
     clusters = []
 
-    print("[聚类] 进行团划分...")
+    print("[Clustering] Partitioning into cliques...")
     while unassigned:
         seed = min(unassigned)
         clique = [seed]
@@ -84,12 +84,12 @@ def clique_partition(fps, threshold=SIM_THRESHOLD):
 
 
 def split_cluster(indices, df):
-    """对单个簇按时间 7:1:2 切分，返回每个索引对应的 split 标签。"""
+    """Split one cluster chronologically in a 7:1:2 ratio and return (index, split) pairs."""
     n = len(indices)
     if n == 0:
         return []
 
-    # 按 release_year 升序，同年份按 pdb_id 稳定排序
+    # Sort by release_year, breaking ties stably by pdb_id.
     sub = df.iloc[indices].copy()
     sub = sub.sort_values(by=["release_year", "pdb_id"], kind="mergesort")
     sorted_indices = sub.index.tolist()
@@ -99,12 +99,12 @@ def split_cluster(indices, df):
     n_test = n - n_train - n_val
 
     splits = ["train"] * n_train + ["val"] * n_val + ["test"] * n_test
-    # splits 按时间顺序对应 sorted_indices
+    # splits correspond to sorted_indices in chronological order.
     return list(zip(sorted_indices, splits))
 
 
 def compute_max_train_tanimoto(query_fps, train_fps):
-    """计算 query 列表与训练集的最大 Tanimoto 相似度数组。"""
+    """Compute maximum Tanimoto similarity to training for each query."""
     max_sims = []
     for qfp in query_fps:
         sims = DataStructs.BulkTanimotoSimilarity(qfp, train_fps)
@@ -136,9 +136,9 @@ def main():
 
     df = pd.read_csv(args.input)
     total = len(df)
-    print(f"[输入] 总样本数: {total}")
+    print(f"[Input] Total samples: {total}")
 
-    # 构建指纹列表
+    # Build the fingerprint list.
     fps = []
     valid_mask = []
     for _, row in df.iterrows():
@@ -153,19 +153,19 @@ def main():
 
     valid_indices = np.where(valid_mask)[0].tolist()
     valid_fps = [fps[i] for i in valid_indices]
-    print(f"[输入] 有效指纹数: {len(valid_fps)}")
+    print(f"[Input] Valid fingerprints: {len(valid_fps)}")
 
-    # 团划分聚类（仅在有效指纹上进行）
+    # Partition valid fingerprints into cliques.
     clusters = clique_partition(valid_fps, threshold=SIM_THRESHOLD)
-    print(f"[聚类] 共生成 {len(clusters)} 个簇")
+    print(f"[Clustering] Generated {len(clusters)} clusters")
 
-    # 簇大小分布
+    # Cluster size distribution
     sizes = [len(c) for c in clusters]
     size_counter = pd.Series(sizes).value_counts().sort_index()
-    print(f"[聚类] 簇大小分布（前 10）:")
+    print(f"[Clustering] Cluster size distribution (first 10):")
     print(size_counter.head(10))
 
-    # 建立全局索引 -> 簇ID / 簇大小
+    # Map global indices to cluster IDs / sizes.
     cluster_id_map = {}
     cluster_size_map = {}
     for cid, c in enumerate(clusters):
@@ -174,13 +174,13 @@ def main():
             cluster_id_map[global_idx] = cid
             cluster_size_map[global_idx] = len(c)
 
-    # 无效指纹样本单独成簇（标记为 -1）
+    # Invalid fingerprints form individual clusters (marked -1).
     for i in range(total):
         if not valid_mask[i]:
             cluster_id_map[i] = -1
             cluster_size_map[i] = 1
 
-    # 对每个簇进行时间划分
+    # Split each cluster chronologically.
     split_labels = np.empty(total, dtype=object)
     for cid, c in enumerate(clusters):
         global_c = [valid_indices[i] for i in c]
@@ -188,13 +188,13 @@ def main():
         for idx, label in assignments:
             split_labels[idx] = label
 
-    # 无效指纹样本直接划入 train
+    # Assign samples with invalid fingerprints directly to train.
     for i in range(total):
         if not valid_mask[i]:
             split_labels[i] = "train"
 
-    # 第三步：移动 val/test 中与训练集最大相似度 < 0.6 的样本到 train
-    print("[过滤] 检查 val/test 与 train 的最大 Tanimoto...")
+    # Step 3: move val/test samples with maximum training similarity <0.6 to train.
+    print("[Filtering] Checking maximum val/test Tanimoto similarity to train...")
     moved_total = 0
     iteration = 0
     while True:
@@ -216,34 +216,34 @@ def main():
             max_sims = compute_max_train_tanimoto(query_fps, train_fps)
             for local_pos, global_idx in enumerate(query_indices):
                 if not valid_mask[global_idx]:
-                    # 无效指纹直接移入 train
+                    # Move invalid fingerprints directly to train.
                     split_labels[global_idx] = "train"
                     moved_this_round += 1
                 elif max_sims[local_pos] < SIM_THRESHOLD:
                     split_labels[global_idx] = "train"
                     moved_this_round += 1
 
-        print(f"[过滤] 第 {iteration} 轮移动 {moved_this_round} 个样本到 train")
+        print(f"[Filtering] Round  {iteration}  moved  {moved_this_round} samples to train")
         moved_total += moved_this_round
         if moved_this_round == 0:
             break
 
-    # 第四步：比例平衡（原 12_balance_val_from_test.py）
-    # 兜底过滤后 test 占比偏高、val 偏低，将 test 按时间最早的 1/3 移到 val
-    print("[平衡] 将 test 中按时间最早的 1/3 样本移入 val...")
+    # Step 4: balance ratios (formerly 12_balance_val_from_test.py).
+    # After fallback filtering, move the earliest third of the oversized test set to val.
+    print("[Balancing] Moving the earliest third of test to val...")
     test_idx = np.where(split_labels == "test")[0]
     test_sub = df.iloc[test_idx].sort_values(by=["release_year", "pdb_id"], kind="mergesort")
     n_move_test_to_val = len(test_sub) // 3
     move_ids = set(test_sub.index[:n_move_test_to_val])
     for i in move_ids:
         split_labels[i] = "val"
-    print(f"[平衡] 从 test 移动 {n_move_test_to_val} 个样本到 val "
+    print(f"[Balancing] Moving  {n_move_test_to_val} samples to val "
           f"(train: {(split_labels == 'train').sum()}, val: {(split_labels == 'val').sum()}, "
           f"test: {(split_labels == 'test').sum()})")
 
-    # 第五步：train:val ≈ 9:1（原 13_adjust_val_to_train_9to1.py）
+    # Step 5: train:val ≈ 9:1 (formerly 13_adjust_val_to_train_9to1.py).
     # (T + m) / (V - m) = 9  =>  m = (9V - T) / 10
-    print("[平衡] 将 val 中按时间最早的样本移入 train，使 train:val ≈ 9:1...")
+    print("[Balancing] Moving the earliest val samples to train for train:val ≈ 9:1...")
     T = int((split_labels == "train").sum())
     V = int((split_labels == "val").sum())
     m = int(round((9.0 * V - T) / 10.0))
@@ -254,10 +254,10 @@ def main():
     for i in move_ids:
         split_labels[i] = "train"
     n_move_val_to_train = m
-    print(f"[平衡] 从 val 移动 {n_move_val_to_train} 个样本到 train "
+    print(f"[Balancing] Moving from val  {n_move_val_to_train} samples to train "
           f"(train:val = {(split_labels == 'train').sum() / (split_labels == 'val').sum():.3f} : 1)")
 
-    # 最终统计
+    # Final statistics
     train_df = df[split_labels == "train"].copy()
     val_df = df[split_labels == "val"].copy()
     test_df = df[split_labels == "test"].copy()
@@ -274,8 +274,8 @@ def main():
     val_df["cluster_size"] = val_df.index.map(cluster_size_map)
     test_df["cluster_size"] = test_df.index.map(cluster_size_map)
 
-    # 计算最终 max_train_tanimoto
-    print("[指纹] 计算最终 val/test 的 max_train_tanimoto...")
+    # Compute final max_train_tanimoto
+    print("[Fingerprints] Computing final val/test max_train_tanimoto...")
     final_train_fps = [fps[i] for i in train_df.index if valid_mask[i]]
     for subset_df in [val_df, test_df]:
         sims_list = []
@@ -289,7 +289,7 @@ def main():
 
     train_df["max_train_tanimoto"] = np.nan
 
-    # 保存
+    # Save
     args.splits_dir.mkdir(parents=True, exist_ok=True)
     train_path = args.splits_dir / "train.csv"
     val_path = args.splits_dir / "val.csv"
@@ -384,15 +384,15 @@ def main():
     with open(args.stats, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
 
-    print(f"\n[输出] 训练集 CSV: {train_path} ({len(train_df)})")
-    print(f"[输出] 验证集 CSV: {val_path} ({len(val_df)})")
-    print(f"[输出] 测试集 CSV: {test_path} ({len(test_df)})")
-    print(f"[输出] 统计 JSON: {args.stats}")
-    print(f"\n[汇总] 最终比例: train {stats['final_ratios']['train']}, "
+    print(f"\n[Output] Training CSV: {train_path} ({len(train_df)})")
+    print(f"[Output] Validation CSV: {val_path} ({len(val_df)})")
+    print(f"[Output] Test CSV: {test_path} ({len(test_df)})")
+    print(f"[Output] Statistics JSON: {args.stats}")
+    print(f"\n[Summary] Final ratios: train {stats['final_ratios']['train']}, "
           f"val {stats['final_ratios']['val']}, test {stats['final_ratios']['test']}")
-    print(f"[汇总] 共移动 {moved_total} 个样本到 train（相似度兜底）")
-    print(f"[汇总] 比例平衡：test→val {n_move_test_to_val} 个，val→train {n_move_val_to_train} 个")
-    print("\n=== 最终 max_train_tanimoto 分布 ===")
+    print(f"[Summary] Moved  {moved_total} samples to train (similarity fallback)")
+    print(f"[Summary] Ratio balancing: test→val {n_move_test_to_val}  samples, val→train {n_move_val_to_train}  samples")
+    print("\n=== Final max_train_tanimoto distribution ===")
     print("val:")
     print(val_df["max_train_tanimoto"].describe())
     print("test:")

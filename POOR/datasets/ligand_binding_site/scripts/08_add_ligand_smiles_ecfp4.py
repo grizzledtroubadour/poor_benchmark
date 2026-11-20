@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 TASK_DIR = Path(__file__).resolve().parent.parent  # datasets/ligand_binding_site
-ROOT = TASK_DIR.parent.parent                      # 项目根（POOR/）
+ROOT = TASK_DIR.parent.parent                      # Project root (POOR/)
 SPLIT_DIR = TASK_DIR / "splits"
 CCD_PATH = ROOT / "data" / "pdb" / "components.cif.gz"
 

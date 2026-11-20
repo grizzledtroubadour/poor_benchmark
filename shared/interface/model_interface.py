@@ -37,8 +37,8 @@ class MInterface_base(pl.LightningModule):
 
     def get_schedular(self, optimizer, lr_scheduler='onecycle'):
         if lr_scheduler == 'step':
-            # StepLR 按 optimizer step 计数：把"每 N 个 epoch 衰减一次"换算成步数
-            # lr_decay_steps 是总优化步数，steps_per_epoch = lr_decay_steps / epoch
+            # StepLR counts optimizer steps; convert an epoch-based decay interval to steps.
+            # lr_decay_steps is the total optimization step count; steps_per_epoch = lr_decay_steps / epoch.
             decay_epochs = getattr(self.hparams, 'lr_decay_epochs', 10)
             gamma = getattr(self.hparams, 'lr_decay_rate', 0.1)
             steps_per_epoch = max(1, int(self.hparams.lr_decay_steps / self.hparams.epoch))

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-解析 DIPS-Plus pair 文件，提取序列、长度、坐标可用性、标签等元数据。
+Parse DIPS-Plus pairs: sequences, lengths, coordinate availability, labels, and metadata.
 
-用法：
+Usage:
     python scripts/parse_pair_files.py --index output/dips_plus_pair_index.csv --num_workers 16
 """
 
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = ROOT / "output"
 
-# 可选依赖，运行前安装：pip install -r requirements.txt
+# Optional dependencies: pip install -r requirements.txt.
 try:
     import dill
 except ImportError:
@@ -42,7 +42,7 @@ except ImportError:
 
 
 def load_pair(path, fmt):
-    """加载 pair 文件，返回 (df0, df1, sequences_dict, pos_idx, neg_idx) 五元组。"""
+    """Load a pair as (df0, df1, sequences_dict, pos_idx, neg_idx)."""
     if fmt == "dill":
         if dill is None:
             raise ImportError("dill package is required for .dill files")
@@ -53,7 +53,7 @@ def load_pair(path, fmt):
         if hickle is None:
             raise ImportError("hickle package is required for .hdf5 files")
         data = hickle.load(path)
-        # data 是 hickled list：[complex_name, df0, df1, pos_idx, neg_idx, srcs, id, sequences]
+        # data is a hickled list: [complex_name, df0, df1, pos_idx, neg_idx, srcs, id, sequences].
         if not isinstance(data, (list, tuple)) or len(data) < 8:
             raise ValueError(f"Unexpected HDF5 structure: {type(data)}")
         return data[1], data[2], data[7], data[3], data[4]
@@ -62,14 +62,14 @@ def load_pair(path, fmt):
 
 
 def safe_seq(seq):
-    """将序列转为字符串。"""
+    """Convert a sequence to a string."""
     if isinstance(seq, bytes):
         return seq.decode("utf-8", errors="ignore")
     return str(seq)
 
 
 def parse_one(row):
-    """解析单个 pair 文件。"""
+    """Parse one pair file."""
     file_path = ROOT / row["file_path"]
     fmt = row["file_format"]
     result = {
@@ -83,17 +83,17 @@ def parse_one(row):
     try:
         df0, df1, sequences, pos_idx, neg_idx = load_pair(file_path, fmt)
 
-        # 序列
+        # Sequences
         result["receptor_seq"] = safe_seq(sequences.get("r_b", ""))
         result["ligand_seq"] = safe_seq(sequences.get("l_b", ""))
         result["receptor_len"] = len(result["receptor_seq"])
         result["ligand_len"] = len(result["ligand_seq"])
 
-        # 链信息
+        # Chain information
         result["receptor_chain"] = ",".join(sorted(set(df0["chain"].dropna().astype(str).unique()))) if hasattr(df0, "columns") else ""
         result["ligand_chain"] = ",".join(sorted(set(df1["chain"].dropna().astype(str).unique()))) if hasattr(df1, "columns") else ""
 
-        # 坐标可用性
+        # Coordinate availability
         has_coords0 = {"x", "y", "z"}.issubset(set(df0.columns)) and len(df0) > 0
         has_coords1 = {"x", "y", "z"}.issubset(set(df1.columns)) and len(df1) > 0
         result["has_receptor_coords"] = has_coords0
@@ -103,11 +103,11 @@ def parse_one(row):
         result["receptor_residues"] = df0["residue"].nunique() if has_coords0 and "residue" in df0.columns else 0
         result["ligand_residues"] = df1["residue"].nunique() if has_coords1 and "residue" in df1.columns else 0
 
-        # 界面样本数
+        # Interface sample counts
         result["pos_pairs"] = len(pos_idx) if hasattr(pos_idx, "__len__") else 0
         result["neg_pairs"] = len(neg_idx) if hasattr(neg_idx, "__len__") else 0
 
-        # IDR 信息
+        # IDR information
         result["has_idr_annotations"] = bool(sequences.get("l_b_idr_annotations") and sequences.get("r_b_idr_annotations"))
         result["has_idr_propensities"] = bool(sequences.get("l_b_idr_propensities") and sequences.get("r_b_idr_propensities"))
 
@@ -120,9 +120,9 @@ def parse_one(row):
 
 def main():
     parser = argparse.ArgumentParser(description="Parse DIPS-Plus pair files")
-    parser.add_argument("--index", default="output/dips_plus_pair_index.csv", help="pair 索引 CSV")
-    parser.add_argument("--num_workers", type=int, default=16, help="并发 worker 数")
-    parser.add_argument("--limit", type=int, default=0, help="仅处理前 N 条（测试用）")
+    parser.add_argument("--index", default="output/dips_plus_pair_index.csv", help="Pair index CSV")
+    parser.add_argument("--num_workers", type=int, default=16, help="Number of concurrent workers")
+    parser.add_argument("--limit", type=int, default=0, help="Process the first N records only (for testing)")
     args = parser.parse_args()
 
     index_path = ROOT / args.index
@@ -151,7 +151,7 @@ def main():
             except Exception as e:
                 logger.error("Worker error: %s", e)
 
-    # 写入元数据表
+    # Write metadata.
     if results:
         out_path = OUTPUT_DIR / "dips_plus_metadata.csv"
         with open(out_path, "w", newline="") as f:
@@ -160,7 +160,7 @@ def main():
             writer.writerows(results)
         logger.info("Metadata saved to %s", out_path)
 
-    # 统计
+    # Statistics
     status_counts = {}
     for r in results:
         status_counts[r["status"]] = status_counts.get(r["status"], 0) + 1

@@ -25,7 +25,7 @@ from tqdm import tqdm
 # Config
 # ---------------------------------------------------------------------------
 TASK_DIR = Path(__file__).resolve().parent.parent  # datasets/ss_prediction
-ROOT = TASK_DIR.parent.parent                      # 仓库根（POOR）
+ROOT = TASK_DIR.parent.parent                      # Repository root (POOR)
 OUTPUT_DIR = TASK_DIR / "output"
 OUTPUT_CSV = OUTPUT_DIR / "pdb_metadata_api.csv"
 CHECKPOINT_FILE = OUTPUT_DIR / "api_checkpoint.json"

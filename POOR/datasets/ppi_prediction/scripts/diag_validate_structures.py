@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-diag_validate_structures.py（原 14_validate_structures.py，2026-08 更名为诊断工具）
+diag_validate_structures.py (formerly 14_validate_structures.py; renamed as diagnostic in 2026-08).
 
-验证已下载的单体 PDB 结构文件是否完整且可被解析（纯诊断，不进主流程）。
+Check downloaded monomer PDB completeness and parsability; diagnostic only, outside the main pipeline.
 
-功能：
-1. 检查文件大小是否为 0
-2. 使用 Bio.PDB 解析 PDB 文件
-3. 检查是否至少包含一条链和若干 ATOM 残基
-4. 生成校验报告与失败文件列表
+Checks:
+1. Reject zero-byte files.
+2. Parse using Bio.PDB.
+3. Require at least one chain and some ATOM residues.
+4. Write validation report and failed-file list.
 
-输入：
+Input:
 - data/pdb_structures_all/*.pdb
 
-输出：
-- output/structure_validation_summary.json：校验统计摘要
-- output/structure_validation_failed.csv：解析失败的文件列表
+Output:
+- output/structure_validation_summary.json: validation summary
+- output/structure_validation_failed.csv: parsing failures
 """
 
 import os
@@ -38,7 +38,7 @@ FAILED_FILE = OUTPUT_DIR / "structure_validation_failed.csv"
 
 
 def validate_one(pdb_path: str):
-    """返回 (pdb_path, status, error_msg, n_chains, n_residues)"""
+    """Return (pdb_path, status, error_msg, n_chains, n_residues)."""
     rel_path = os.path.relpath(pdb_path, PDB_DIR)
     try:
         size = os.path.getsize(pdb_path)
@@ -55,7 +55,7 @@ def validate_one(pdb_path: str):
             for chain in model:
                 n_chains += 1
                 for residue in chain:
-                    if residue.id[0].strip() == "":  # 仅统计 ATOM，跳过 HETATM/water
+                    if residue.id[0].strip() == "":  # Count ATOM only; skip HETATM/water.
                         n_residues += 1
                         has_atom = True
 
@@ -80,7 +80,7 @@ def main():
     failed = []
     summary = {"total": total, "ok": 0, "empty": 0, "no_atoms": 0, "parse_error": 0}
 
-    # 并行校验
+    # Validate in parallel.
     max_workers = min(os.cpu_count() or 4, 16)
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(validate_one, f): f for f in pdb_files}
@@ -96,11 +96,11 @@ def main():
             if i % 5000 == 0 or i == total:
                 print(f"  validated {i}/{total} ... ok={summary['ok']} failed={summary['total']-summary['ok']}")
 
-    # 保存摘要
+    # Save summary.
     with open(SUMMARY_FILE, "w") as f:
         json.dump(summary, f, indent=2)
 
-    # 保存失败列表
+    # Save failed-file list.
     with open(FAILED_FILE, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["file", "status", "error"])
         writer.writeheader()

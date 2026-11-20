@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-为 DIPS-Plus pair 文件生成残基级界面标签。
+Generate residue-level interface labels for DIPS-Plus pairs.
 
-默认基于 pair 文件中预采样好的 pos_idx（正例原子对）推导界面残基：
-若某残基在 pos_idx 中出现过，则标记为 1，否则为 0。
+By default derive interface residues from presampled positive atom pairs in pos_idx:
+label a residue 1 if it occurs in pos_idx, otherwise 0.
 
-用法：
+Usage:
     python scripts/generate_interface_labels.py --metadata output/dips_plus_metadata.csv --num_workers 32
 """
 
@@ -50,7 +50,7 @@ except ImportError:
 
 
 def load_pair(path, fmt):
-    """加载 pair 文件，返回 (df0, df1, sequences, pos_idx, neg_idx)。"""
+    """Load a pair as (df0, df1, sequences, pos_idx, neg_idx)."""
     if fmt == "dill":
         if dill is None:
             raise ImportError("dill required")
@@ -67,14 +67,14 @@ def load_pair(path, fmt):
 
 
 def residue_labels_from_atom_pairs(df, atom_indices, max_residues):
-    """根据 atom_indices 在该链中出现的位置，生成残基级标签。"""
+    """Generate residue labels from atom_indices positions in a chain."""
     labels = np.zeros(max_residues, dtype=int)
     if len(atom_indices) == 0:
         return labels
 
-    # 将 atom_indices 映射到 residue 编号（按 DataFrame 中的顺序）
+    # Map atom_indices to residue numbers in DataFrame order.
     residues = df["residue"].iloc[atom_indices].values
-    # 残基在序列中的位置：按首次出现顺序编号 0..N-1
+    # Number sequence residues 0..N-1 in first-appearance order.
     unique_residues = df["residue"].unique()
     res_to_idx = {res: i for i, res in enumerate(unique_residues)}
 
@@ -100,7 +100,7 @@ def process_one(row):
         r_len = len(r_seq) if isinstance(r_seq, str) else len(r_seq)
         l_len = len(l_seq) if isinstance(l_seq, str) else len(l_seq)
 
-        # 从 pos_idx 推导界面残基
+        # Derive interface residues from pos_idx.
         r_labels = residue_labels_from_atom_pairs(df0, pos_idx[:, 0], r_len)
         l_labels = residue_labels_from_atom_pairs(df1, pos_idx[:, 1], l_len)
 
@@ -112,7 +112,7 @@ def process_one(row):
         result["ligand_interface_ratio"] = round(float(l_labels.mean()), 4)
         result["status"] = "success"
 
-        # 保存独立标签文件
+        # Save individual label files.
         label_dir = OUTPUT_DIR / "interface_labels"
         label_dir.mkdir(parents=True, exist_ok=True)
         np.savez(
@@ -128,8 +128,8 @@ def process_one(row):
 
 def main():
     parser = argparse.ArgumentParser(description="Generate interface labels for DIPS-Plus")
-    parser.add_argument("--metadata", default="output/dips_plus_metadata.csv", help="元数据 CSV")
-    parser.add_argument("--num_workers", type=int, default=32, help="并发 worker 数")
+    parser.add_argument("--metadata", default="output/dips_plus_metadata.csv", help="Metadata CSV")
+    parser.add_argument("--num_workers", type=int, default=32, help="Number of concurrent workers")
     args = parser.parse_args()
 
     metadata_path = ROOT / args.metadata
@@ -156,7 +156,7 @@ def main():
             except Exception as e:
                 logger.error("Worker error: %s", e)
 
-    # 保存标签分布
+    # Save label distribution.
     if results:
         out_path = OUTPUT_DIR / "interface_label_distribution.csv"
         with open(out_path, "w", newline="") as f:

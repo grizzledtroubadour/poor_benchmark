@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""统一 NewEC OOD 口径并落盘到 7 个任务的 test csv（2026-08-27）。
+"""Unify NewEC OOD definitions and write seven task test CSVs (2026-08-27).
 
-统一定义：
-- 参考集：train+val 中出现的 EC 集合（对应层级）
-- 语义：**all-not-in** —— 样本有 EC 注释、且其所有 EC（对应层级）都不在
-  train+val 集合中 → True；无 EC 注释 → False
-- 层级解析与 LongTailEC 统一脚本一致（levels()：段数 ≥3 → L3=前三段；
-  段数 ==4 → L4=完整编号；允许部分 "-"）
-- L4 列（OOD_NewEC_L4）就地重算，L3 列（OOD_NewEC_L3）追加到末尾
-- 各任务 Default=False（极端长度预挑出）行一律置 NaN（"未计算"语义，
-  全项目统一惯例，流水线位置直接写入；finalize --mode nan 仅作兜底校验）；
-  affinity 全部 Default=True，不触发该惯例
-- 排除：fold（EC7 prior）、PDA、func go_*；func_ec 仅 L4（L3 是预测目标层级）
+Canonical definition:
+- Reference: EC sets at the given level in train+val.
+- **all-not-in**: annotated samples whose every EC at the given level is absent from
+  train+val -> True; no EC annotation -> False.
+- Hierarchy parsing matches LongTailEC: levels(), >=3 components -> L3=first three;
+  exactly four components -> L4=full number; partial "-" allowed.
+- Recompute OOD_NewEC_L4 in place; append OOD_NewEC_L3.
+- Default=False extreme-length rows receive NaN (not computed), directly in the pipeline;
+  this is the project-wide convention; finalize --mode nan is fallback validation only.
+  All affinity rows have Default=True, so this convention does not affect them.
+- Exclude fold (EC7 prior), PDA, and func go_*; func_ec uses L4 only (L3 is the prediction level).
 
-用法：python3 .skills/ec-function-ood-annotation/scripts/add_unified_newec.py
+Usage: python3 .skills/ec-function-ood-annotation/scripts/add_unified_newec.py
 """
 import csv
 import gzip
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
-# 仓库根：.skills/ec-function-ood-annotation/scripts/ 上溯 3 级
+# Repository root: three levels above .skills/ec-function-ood-annotation/scripts/.
 POOR = Path(__file__).resolve().parents[3]
 SIFTS_EC_TSV = POOR / "data" / "sifts" / "sifts_chain_ec.tsv.gz"
 
@@ -63,7 +63,7 @@ def newec_flags(ec_set, tv3, tv4):
 
 
 def apply(test, flags_by_uid, mask, nan_for_excluded, add_l3=True):
-    """flags_by_uid: {unique_id: (l3_flag, l4_flag)}。L4 就地重算，L3 追加（add_l3=False 时不加）。"""
+    """flags_by_uid: {unique_id: (l3_flag, l4_flag)}. Recompute L4; append L3 unless add_l3=False."""
     lut3 = {u: f[0] for u, f in flags_by_uid.items()}
     lut4 = {u: f[1] for u, f in flags_by_uid.items()}
     if nan_for_excluded:
@@ -73,11 +73,11 @@ def apply(test, flags_by_uid, mask, nan_for_excluded, add_l3=True):
         new_l3 = pd.Series(False, index=test.index)
         l4_vals = pd.Series(False, index=test.index)
     l4_vals[mask] = test.loc[mask, "unique_id"].map(lut4).to_numpy()
-    test[L4_COL] = l4_vals          # 就地重算（保持列位置）
+    test[L4_COL] = l4_vals          # Recompute in place, preserving column position.
     counts = {L4_COL: int((test[L4_COL] == True).sum())}  # noqa: E712
     if add_l3:
         new_l3[mask] = test.loc[mask, "unique_id"].map(lut3).to_numpy()
-        test[L3_COL] = new_l3       # 追加到末尾
+        test[L3_COL] = new_l3       # Append at the end.
         counts[L3_COL] = int((test[L3_COL] == True).sum())  # noqa: E712
     return test, counts
 
@@ -135,7 +135,7 @@ def main():
              lambda u: pdb_ec.get(u.lower(), set()),
              lambda t: t["Default"] == True, nan_for_excluded=True)  # noqa: E712
 
-    # ---- ppi（行级 EC，双路并集） ----
+    # ---- ppi: row-level EC, union of two sources. ----
     ec_csv = pd.read_csv(POOR / "datasets/ppi_prediction/output/uniprot_ec_mapping.csv")
     ec_csv["ec_numbers"] = ec_csv["ec_numbers"].fillna("")
     uniprot_ec = {r["uniprot_id"]: {x.strip() for x in str(r["ec_numbers"]).split(";") if x.strip()}
@@ -169,7 +169,7 @@ def main():
             tv3 |= {levels(e)[0] for e in s} - {None}
             tv4 |= {levels(e)[1] for e in s} - {None}
     mask = ppi_test["Default"] == True  # noqa: E712
-    # Default=False（极端长度）行置 NaN（全项目统一惯例，流水线位置直接写入）
+    # Default=False extreme-length rows receive NaN directly by project convention.
     l3_vals = pd.Series(pd.NA, index=ppi_test.index, dtype=object)
     l4_vals = pd.Series(pd.NA, index=ppi_test.index, dtype=object)
     l3_list, l4_list = [], []
@@ -224,8 +224,8 @@ def main():
              ppis_ec,
              lambda t: t["Default"] == True, nan_for_excluded=True)  # noqa: E712
 
-    # ---- func_ec（仅 L4；L3 是预测目标层级，不加） ----
-    # EC 源用 SIFTS 链级 tsv（与 LongTailEC_L4 同源），all-not-in，train+val 参考
+    # ---- func_ec: L4 only; L3 is the prediction level and is omitted. ----
+    # SIFTS chain EC TSV, as in LongTailEC_L4; all-not-in against train+val.
     run_task("func_ec", POOR / "datasets/func_prediction",
              "ec_test.csv", "ec_train.csv", "ec_val.csv",
              lambda u: sifts.get((u[:4].lower(), u[5:]), set()),

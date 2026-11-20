@@ -17,7 +17,7 @@ from Bio.PDB import MMCIFParser, PDBIO, PDBParser, Select
 
 # Config
 TASK_DIR = Path(__file__).resolve().parent.parent  # datasets/ss_prediction
-ROOT = TASK_DIR.parent.parent                      # 仓库根（POOR）
+ROOT = TASK_DIR.parent.parent                      # Repository root (POOR)
 RAW_PDB_DIR = ROOT / "data" / "pdb"
 OUTPUT_DIR = TASK_DIR / "pdbs"
 REPRESENTATIVES_CSV = TASK_DIR / "output" / "stage4_cluster_representatives.csv"

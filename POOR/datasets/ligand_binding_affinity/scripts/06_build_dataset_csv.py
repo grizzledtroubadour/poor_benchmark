@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
-脚本：06_build_dataset_csv.py
-用途：由 05 的序列产物生成样本级数据集 output/pdbbind_v2020_dataset.csv
-      （Stage 2 划分与 OOD 流程的输入）。
+Script: 06_build_dataset_csv.py
+Purpose: Build output/pdbbind_v2020_dataset.csv from step-05 sequence outputs
+      as input to the Stage 2 splitting and OOD workflow.
 
-      本脚本替代已归档的 08_extract_protein_chains.py 的链级结构路线：
-      不再逐链写出独立 PDB 文件（整蛋白结构由 07_copy_whole_protein_pdbs.py 落盘），
-      只保留序列提取成功的样本并补充结构文件路径列。
-      chain_extraction_success / chain_extraction_error 两列为兼容历史下游
-      （08_cluster_time_split.py 等）保留，取值与序列提取成功标记一致。
+      Replaces the archived chain-structure route in 08_extract_protein_chains.py:
+      no separate chain PDBs are written (07_copy_whole_protein_pdbs.py writes whole proteins).
+      Keep samples with successful sequence extraction and add structure paths.
+      chain_extraction_success / chain_extraction_error are retained for legacy downstream
+      consumers (including 08_cluster_time_split.py), matching sequence-extraction success.
 
-使用：
+Usage:
     cd ligand_binding_affinity/
     python scripts/06_build_dataset_csv.py
 
-输入：
+Input:
     output/pdbbind_v2020_metadata_seq.csv
 
-输出：
+Output:
     output/pdbbind_v2020_dataset.csv
     output/protein_chain_extraction_stats.json
 """
@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pandas as pd
 
-# 输出列顺序与历史 dataset.csv 保持一致（见 docstring）
+# Preserve the historical dataset.csv column order (see docstring).
 FINAL_COLUMNS = [
     "pdb_id", "resolution", "release_year", "affinity_type", "affinity_operator",
     "affinity_value", "pK", "ligand_name", "reference", "year_range",
@@ -68,17 +68,17 @@ def main():
 
     df = pd.read_csv(args.input)
     total = len(df)
-    print(f"[输入] 清洗并解析配体/序列后的样本数: {total}")
+    print(f"[Input] Samples after cleaning and ligand/sequence parsing: {total}")
 
-    # 仅保留序列提取成功的样本作为最终数据集
+    # Keep successfully extracted sequences in the final dataset.
     final_df = df[df["protein_sequence_extract_success"] == True].copy()
     failure_df = df[df["protein_sequence_extract_success"] != True].copy()
 
-    # 兼容列：历史链级路线的成功标记（取值与序列提取一致）
+    # Compatibility flag for the historical chain route; matches sequence extraction.
     final_df["chain_extraction_success"] = final_df["protein_sequence_extract_success"]
     final_df["chain_extraction_error"] = final_df["protein_sequence_error"]
 
-    # 整蛋白结构文件路径（由 07 落盘）
+    # Whole-protein structure path (written by step 07).
     final_df["protein_pdb_file"] = final_df["pdb_id"].apply(lambda x: f"pdbs/{x}.pdb")
 
     final_df = final_df[FINAL_COLUMNS]
@@ -88,31 +88,31 @@ def main():
     if not failure_df.empty:
         failure_path = args.output.parent / "protein_chain_extraction_failures.csv"
         failure_df.to_csv(failure_path, index=False)
-        print(f"[输出] 提取失败样本 CSV: {failure_path}")
+        print(f"[Output] Failed extraction CSV: {failure_path}")
 
     stats = {
         "total_input": total,
         "chain_extraction_success": int(len(final_df)),
         "chain_extraction_failure": int(len(failure_df)),
         "retention_rate": round(len(final_df) / total, 4) if total > 0 else 0.0,
-        "total_chain_files": 0,  # 链级 PDB 路线已废弃，整蛋白结构见 07
+        "total_chain_files": 0,  # Chain-level PDB export is obsolete; see step 07.
         "num_chains_distribution": {
             "min": int(final_df["num_protein_chains"].min()) if len(final_df) else 0,
             "max": int(final_df["num_protein_chains"].max()) if len(final_df) else 0,
             "mean": round(float(final_df["num_protein_chains"].mean()), 2) if len(final_df) else 0.0,
         },
-        "note": "链级 PDB 路线已废弃（原 08_extract_protein_chains.py 归档）；"
-                "chain_extraction_* 列为兼容保留，整蛋白结构由 07 落盘。",
+        "note": "Chain-level PDB export is obsolete (08_extract_protein_chains.py is archived); "
+                "chain_extraction_* columns are retained for compatibility; step 07 writes whole proteins.",
     }
 
     with open(args.stats, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
 
-    print(f"[输出] 保留样本: {len(final_df)}")
-    print(f"[输出] 剔除样本: {len(failure_df)}")
-    print(f"[输出] 每条样本平均链数: {stats['num_chains_distribution']['mean']}")
-    print(f"[输出] 最终数据集 CSV: {args.output}")
-    print(f"[输出] 统计 JSON: {args.stats}")
+    print(f"[Output] Retained samples: {len(final_df)}")
+    print(f"[Output] Excluded samples: {len(failure_df)}")
+    print(f"[Output] Mean chains per sample: {stats['num_chains_distribution']['mean']}")
+    print(f"[Output] Final dataset CSV: {args.output}")
+    print(f"[Output] Statistics JSON: {args.stats}")
 
 
 if __name__ == "__main__":

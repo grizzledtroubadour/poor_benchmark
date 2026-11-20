@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-脚本：05_extract_protein_sequences.py
-用途：从 PDBbind v2020.R1 蛋白 PDB 文件中按链提取蛋白质序列。
-      多链蛋白的各链序列使用 `|` 分隔（与最终 pdbs/ 整蛋白结构对齐的口径，
-      已并入原 17_reextract_sequences_from_pdbs.py 的按链提取逻辑；
-      由于提取时按 (chain, res_seq, res_name) 去重且只保留蛋白残基，
-      从原始 {pdb_id}_protein.pdb 提取与从 07 过滤后的 pdbs/ 提取结果一致）。
+Script: 05_extract_protein_sequences.py
+Purpose: Extract protein sequences by chain from PDBbind v2020.R1 protein PDBs.
+      Separate chains with `|` to align with the final whole-protein structures in pdbs/.
+      Incorporates chain extraction from the former 17_reextract_sequences_from_pdbs.py.
+      Deduplication by (chain, res_seq, res_name) and protein-only filtering ensure agreement
+      between extraction from source {pdb_id}_protein.pdb and step-07-filtered pdbs/.
 
-使用：
+Usage:
     cd ligand_binding_affinity/
     python scripts/05_extract_protein_sequences.py
 
-输入：
+Input:
     output/pdbbind_v2020_metadata_ligand.csv
 
-输出：
+Output:
     output/pdbbind_v2020_metadata_seq.csv
     output/pdbbind_v2020_metadata_seq_stats.json
     output/sequence_extraction_failures.csv
@@ -27,7 +27,7 @@ from collections import Counter, OrderedDict
 
 import pandas as pd
 
-# 标准氨基酸映射
+# Standard amino-acid mapping
 AA_3TO1 = {
     "ALA": "A", "CYS": "C", "ASP": "D", "GLU": "E", "PHE": "F",
     "GLY": "G", "HIS": "H", "ILE": "I", "LYS": "K", "LEU": "L",
@@ -35,20 +35,20 @@ AA_3TO1 = {
     "SER": "S", "THR": "T", "VAL": "V", "TRP": "W", "TYR": "Y",
 }
 
-# 常见修饰氨基酸映射回标准氨基酸
+# Map common modified residues to standard amino acids.
 MODIFIED_AA = {
-    "MSE": "M",  # 硒代甲硫氨酸
-    "SEP": "S",  # 磷酸丝氨酸
-    "TPO": "T",  # 磷酸苏氨酸
-    "PTR": "Y",  # 磷酸酪氨酸
-    "KCX": "K",  # 赖氨酸羧化
-    "CSO": "C",  # 氧化半胱氨酸
-    "CSD": "C",  # 半胱氨酸亚砜
-    "CME": "C",  # S,S-(2-羟乙基)硫代半胱氨酸
-    "LYZ": "K",  # 羟基赖氨酸
-    "MLY": "K",  # 甲基赖氨酸
-    "M3L": "K",  # 三甲基赖氨酸
-    "HYP": "P",  # 羟脯氨酸
+    "MSE": "M",  # Selenomethionine
+    "SEP": "S",  # Phosphoserine
+    "TPO": "T",  # Phosphothreonine
+    "PTR": "Y",  # Phosphotyrosine
+    "KCX": "K",  # Carboxylated lysine
+    "CSO": "C",  # Oxidized cysteine
+    "CSD": "C",  # Cysteine sulfoxide
+    "CME": "C",  # S,S-(2-hydroxyethyl)thiocysteine
+    "LYZ": "K",  # Hydroxylysine
+    "MLY": "K",  # Methyllysine
+    "M3L": "K",  # Trimethyllysine
+    "HYP": "P",  # Hydroxyproline
     "DAL": "A", "DVA": "V", "DLE": "L", "DIL": "I", "DTY": "Y",
     "DTR": "W", "DSE": "S", "DTH": "T", "DASN": "N", "DGLN": "Q",
     "DARG": "R", "DLY": "K", "DPR": "P", "DPH": "F", "DHI": "H",
@@ -61,15 +61,15 @@ PROTEIN_RES = set(list(AA_3TO1.keys()) + list(MODIFIED_AA.keys()))
 
 def extract_chain_sequences(pdb_path: Path):
     """
-    从 PDB 文件中按链提取蛋白序列。
-    保持链在文件中的出现顺序，链内按文件行顺序取每个残基首次出现
-    （按 (chain, res_seq, res_name) 去重，NMR 多模型的重复残基自然塌缩）。
-    返回 (chain_ids, chain_sequences)；失败返回 (None, error_msg)。
+    Extract protein sequences from a PDB by chain.
+    Preserve first-appearance chain order and the first occurrence of each residue
+    keyed by (chain, res_seq, res_name); duplicates across NMR models collapse naturally.
+    Return (chain_ids, chain_sequences), or (None, error_msg) on failure.
     """
     if not pdb_path.exists():
         return None, None, "PDB file not found"
 
-    chains = OrderedDict()  # chain_id -> [aa, ...]，保持链首次出现顺序
+    chains = OrderedDict()  # chain_id -> [aa, ...], preserving first appearance.
     seen = set()
 
     try:
@@ -85,7 +85,7 @@ def extract_chain_sequences(pdb_path: Path):
                     continue
 
                 chain_id = line[21].strip() if len(line) > 21 else ""
-                res_seq_str = line[22:27].strip()  # 包含插入码
+                res_seq_str = line[22:27].strip()  # Includes insertion codes.
 
                 key = (chain_id, res_seq_str, res_name)
                 if key in seen:
@@ -149,10 +149,10 @@ def main():
     args = parser.parse_args()
 
     df = pd.read_csv(args.input)
-    # 只处理配体解析成功的样本
+    # Process only samples with successfully parsed ligands.
     df = df[df["ligand_parse_success"] == True].copy()
     total = len(df)
-    print(f"[输入] 配体解析成功样本数: {total}")
+    print(f"[Input] Successfully parsed ligand samples: {total}")
 
     results = []
     for _, row in df.iterrows():
@@ -163,7 +163,7 @@ def main():
         chain_ids, chain_seqs, error = extract_chain_sequences(protein_path)
 
         if error is None:
-            # 多链蛋白的各链序列用 `|` 分隔；单链不加分隔符
+            # Separate chains with `|`; omit separators for single-chain proteins.
             seq = "|".join(chain_seqs)
             total_len = sum(len(s) for s in chain_seqs)
             success = total_len >= args.min_length
@@ -210,14 +210,14 @@ def main():
     with open(args.stats, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
 
-    print(f"[输出] 序列提取成功: {len(success_df)}")
-    print(f"[输出] 序列提取失败: {len(failure_df)}")
-    print(f"[输出] 保留比例: {stats['retention_rate']*100:.2f}%")
-    print(f"[输出] 成功样本 CSV: {args.output}")
-    print(f"[输出] 失败样本 CSV: {args.failures}")
-    print(f"[输出] 统计 JSON: {args.stats}")
+    print(f"[Output] Successful sequence extractions: {len(success_df)}")
+    print(f"[Output] Failed sequence extractions: {len(failure_df)}")
+    print(f"[Output] Retention rate: {stats['retention_rate']*100:.2f}%")
+    print(f"[Output] Successful samples CSV: {args.output}")
+    print(f"[Output] Failed samples CSV: {args.failures}")
+    print(f"[Output] Statistics JSON: {args.stats}")
     print()
-    print("=== 失败原因分布 ===")
+    print("=== Failure reason distribution ===")
     for reason, count in stats["failure_reasons"].items():
         print(f"  {reason}: {count}")
 

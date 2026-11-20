@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-脚本：07_copy_whole_protein_pdbs.py
-用途：删除 pdbs/ 下的链级结构，改为存放整条蛋白结构文件。
-      文件名仅使用 {pdb_id}.pdb，不含有配体名；文件中过滤掉非蛋白残基的 HETATM。
+Script: 07_copy_whole_protein_pdbs.py
+Purpose: Replace chain-level structures in pdbs/ with whole-protein structure files.
+      Use {pdb_id}.pdb filenames without ligand names; filter non-protein HETATM residues.
 
-使用：
+Usage:
     cd ligand_binding_affinity/
     python scripts/07_copy_whole_protein_pdbs.py
 
-输入：
+Input:
     output/pdbbind_v2020_dataset.csv
 
-输出：
+Output:
     pdbs/{pdb_id}.pdb
-    output/pdbbind_v2020_dataset.csv（更新蛋白结构文件路径列）
+    output/pdbbind_v2020_dataset.csv (updated protein structure path column)
 """
 
 import argparse
@@ -23,7 +23,7 @@ from collections import Counter
 
 import pandas as pd
 
-# 标准氨基酸与常见修饰氨基酸
+# Standard and common modified amino acids
 AA_3TO1 = {
     "ALA": "A", "CYS": "C", "ASP": "D", "GLU": "E", "PHE": "F",
     "GLY": "G", "HIS": "H", "ILE": "I", "LYS": "K", "LEU": "L",
@@ -46,8 +46,8 @@ PROTEIN_RESIDUES = set(list(AA_3TO1.keys()) + list(MODIFIED_AA.keys()))
 
 def copy_protein_without_ligand(src_path: Path, dst_path: Path):
     """
-    复制蛋白 PDB，排除非蛋白残基的 HETATM（如水、配体小分子）。
-    遇到第一个 ENDMDL 后停止，跳过 NMR 后续模型。
+    Copy a protein PDB, excluding non-protein HETATM residues such as water and ligands.
+    Stop at the first ENDMDL to skip subsequent NMR models.
     """
     with open(src_path, "r", encoding="utf-8") as fin, \
          open(dst_path, "w", encoding="utf-8") as fout:
@@ -67,7 +67,7 @@ def copy_protein_without_ligand(src_path: Path, dst_path: Path):
                         fout.write(line)
                 continue
 
-            # 其他行（HEADER, COMPND, REMARK, SEQRES, SSBOND, TER, END 等）原样保留
+            # Preserve other records (HEADER, COMPND, REMARK, SEQRES, SSBOND, TER, END, etc.).
             fout.write(line)
 
             if line.startswith("END"):
@@ -98,16 +98,16 @@ def main():
 
     df = pd.read_csv(args.input)
     total = len(df)
-    print(f"[输入] 样本数: {total}")
+    print(f"[Input] Samples: {total}")
 
     args.pdbs_dir.mkdir(parents=True, exist_ok=True)
 
-    # 清空已有的 .pdb 文件
+    # Remove existing .pdb files.
     removed = 0
     for old_pdb in args.pdbs_dir.glob("*.pdb"):
         old_pdb.unlink()
         removed += 1
-    print(f"[清理] 删除旧 PDB 文件: {removed} 个")
+    print(f"[Cleanup] Removed old PDB files: {removed} files")
 
     success = 0
     failed = []
@@ -129,7 +129,7 @@ def main():
         except Exception as e:
             failed.append((pdb_id, str(e)))
 
-    # 更新数据集：去掉链级文件路径列，添加整蛋白结构文件路径
+    # Replace chain-level path columns with whole-protein structure paths.
     if "protein_chain_files" in df.columns:
         df = df.drop(columns=["protein_chain_files"])
     df["protein_pdb_file"] = df["pdb_id"].apply(lambda x: f"pdbs/{x}.pdb")
@@ -148,10 +148,10 @@ def main():
     with open(stats_path, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
 
-    print(f"[输出] 成功写入整蛋白 PDB: {success}")
-    print(f"[输出] 失败: {len(failed)}")
-    print(f"[输出] 更新数据集 CSV: {args.input}")
-    print(f"[输出] 统计 JSON: {stats_path}")
+    print(f"[Output] Successfully written whole-protein PDBs: {success}")
+    print(f"[Output] Failures: {len(failed)}")
+    print(f"[Output] Updated dataset CSV: {args.input}")
+    print(f"[Output] Statistics JSON: {stats_path}")
 
 
 if __name__ == "__main__":

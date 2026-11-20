@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-脚本：03_clean_metadata.py
-用途：对 PDBbind v2020.R1 元数据进行清洗过滤。
+Script: 03_clean_metadata.py
+Purpose: Clean and filter PDBbind v2020.R1 metadata.
 
-使用：
+Usage:
     cd binding_affinity/
     python scripts/03_clean_metadata.py
 
-默认过滤规则（可通过命令行参数开关）：
-    --exclude-ic50                排除 IC50 样本
-    --exclude-inequality          排除亲和力带不等号（< / <= / ~）的样本
-    --exclude-incomplete-ligand   排除 [Incomplete ligand] 标记样本
-    --exclude-covalent            排除 [Covalent complex] 标记样本
-    --exclude-different-protein   排除 [Different protein in assay] 标记样本
-    --exclude-different-ligand    排除 [Different ligand in assay] 标记样本
-    --exclude-uncommon-element    排除 [Uncommon element] 标记样本（默认保留）
+Default filters (configurable through command-line flags):
+    --exclude-ic50                Exclude IC50 samples.
+    --exclude-inequality          Exclude affinity values with inequality operators (< / <= / ~).
+    --exclude-incomplete-ligand   Exclude samples flagged [Incomplete ligand].
+    --exclude-covalent            Exclude samples flagged [Covalent complex].
+    --exclude-different-protein   Exclude samples flagged [Different protein in assay].
+    --exclude-different-ligand    Exclude samples flagged [Different ligand in assay].
+    --exclude-uncommon-element    Exclude [Uncommon element] samples (retained by default).
 
-输入：
+Input:
     output/pdbbind_v2020_metadata.csv
 
-输出：
+Output:
     output/pdbbind_v2020_metadata_cleaned.csv
     output/pdbbind_v2020_metadata_cleaned_stats.json
 """
@@ -50,8 +50,8 @@ def clean_metadata(
         "filters": {},
     }
 
-    # 依次应用过滤规则，记录每步移除数量
-    # 注意：使用副本，避免修改原始 df
+    # Apply filters sequentially and record removals at each step.
+    # Use a copy to avoid modifying the original df.
     cleaned = df.copy()
 
     if exclude_ic50:
@@ -64,7 +64,7 @@ def clean_metadata(
         }
 
     if exclude_inequality:
-        # 只保留精确值 '='
+        # Keep only exact values ('=').
         mask = cleaned["affinity_operator"] != "="
         removed = mask.sum()
         cleaned = cleaned[~mask]
@@ -118,41 +118,41 @@ def clean_metadata(
             "remaining": int(len(cleaned)),
         }
 
-    # 最终统计
+    # Final statistics
     stats["total_after"] = int(len(cleaned))
     stats["removed_total"] = int(total - len(cleaned))
     stats["retention_rate"] = round(len(cleaned) / total, 4) if total > 0 else 0.0
 
-    # 亲和力类型分布
+    # Affinity type distribution
     stats["affinity_type_counts_after"] = cleaned["affinity_type"].value_counts().to_dict()
 
-    # 年份范围
+    # Year range
     stats["release_year_range"] = {
         "min": int(cleaned["release_year"].min()),
         "max": int(cleaned["release_year"].max()),
     }
 
-    # pK 统计
+    # pK statistics
     stats["pK_stats"] = cleaned["pK"].describe().to_dict()
 
-    # 保存
+    # Save
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     cleaned.to_csv(output_csv, index=False)
 
     with open(stats_path, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
 
-    print(f"[输入] 清洗前样本数: {total}")
-    print(f"[输出] 清洗后样本数: {len(cleaned)}")
-    print(f"[输出] 保留比例: {stats['retention_rate']*100:.2f}%")
-    print(f"[输出] 清洗后 CSV: {output_csv}")
-    print(f"[输出] 统计 JSON: {stats_path}")
+    print(f"[Input] Samples before cleaning: {total}")
+    print(f"[Output] Samples after cleaning: {len(cleaned)}")
+    print(f"[Output] Retention rate: {stats['retention_rate']*100:.2f}%")
+    print(f"[Output] Cleaned CSV: {output_csv}")
+    print(f"[Output] Statistics JSON: {stats_path}")
     print()
-    print("=== 各过滤步骤 ===")
+    print("=== Filtering steps ===")
     for name, s in stats["filters"].items():
-        print(f"  {name}: 移除 {s['removed']}，剩余 {s['remaining']}")
+        print(f"  {name}: removed {s['removed']}，remaining {s['remaining']}")
     print()
-    print(f"=== 最终亲和力类型分布 ===")
+    print(f"=== Final affinity type distribution ===")
     for k, v in stats["affinity_type_counts_after"].items():
         print(f"  {k}: {v}")
 
@@ -178,7 +178,7 @@ def main():
         help="Output stats JSON",
     )
 
-    # 过滤开关
+    # Filter switches
     parser.add_argument("--exclude-ic50", action="store_true", default=True, help="Exclude IC50 samples")
     parser.add_argument("--exclude-inequality", action="store_true", default=True, help="Exclude samples with inequality operators")
     parser.add_argument("--exclude-incomplete-ligand", action="store_true", default=True, help="Exclude [Incomplete ligand] samples")
@@ -187,7 +187,7 @@ def main():
     parser.add_argument("--exclude-different-ligand", action="store_true", default=True, help="Exclude [Different ligand in assay] samples")
     parser.add_argument("--exclude-uncommon-element", action="store_true", default=False, help="Exclude [Uncommon element] samples")
 
-    # 允许用 --no-exclude-xxx 关闭默认过滤
+    # Allow --no-exclude-xxx to disable default filters.
     parser.add_argument("--no-exclude-ic50", dest="exclude_ic50", action="store_false")
     parser.add_argument("--no-exclude-inequality", dest="exclude_inequality", action="store_false")
     parser.add_argument("--no-exclude-incomplete-ligand", dest="exclude_incomplete_ligand", action="store_false")

@@ -1,299 +1,265 @@
-# POOD-Benchmark 数据处理规范
+# POOD-Benchmark Data Processing Standards
 
-## 描述
+## Description
 
-本 skill 汇总了 POOD-Benchmark 项目（`raw_data/`）原始数据处理的全部规范，包括：
+Standards for processing raw data in POOD-Benchmark (`raw_data/`):
 
-- 各任务目录内部文件夹组织约定
-- 数据集划分文件格式与输出路径
-- OOD（分布外）测试集定义与命名
-- `DATA_PROCESS.md` 文档写作标准
-- 数据质量检查与可复现性要求
+- Internal task-directory organization.
+- Dataset split formats and output paths.
+- OOD test-set definitions and naming.
+- DATA_PROCESS.md documentation standards.
+- Quality control and reproducibility.
 
-## 何时使用
+## When to use
 
-在以下场景调用本 skill：
+- Process data in a POOD task directory: fold_classification, ppi_prediction, func_prediction, ss_prediction, ppis_prediction, ligand_binding_site, or antibody_antigen.
+- Write, review, or revise DATA_PROCESS.md.
+- Generate split files in `{task_dir}/splits/`.
+- Design OOD test sets or adjust thresholds.
+- Check leakage, distribution consistency, or outliers.
 
-- 在任意 POOD-Benchmark 任务目录（`fold_classification/`、`ppi_prediction/`、`func_prediction/`、`ss_prediction/`、`ppis_prediction/`、`ligand_binding_site/`、`antibody_antigen/`）中处理数据
-- 编写、审阅或修改 `DATA_PROCESS.md`
-- 生成 `{task_dir}/splits/` 下的划分文件
-- 设计新的 OOD 测试集或调整 OOD 阈值
-- 检查数据泄露、分布一致性、异常值
+## 1. Task-directory organization
 
-## 1. 任务目录内部文件夹组织
-
-每个任务目录必须按以下约定组织子文件夹：
-
-| 文件夹 | 用途 | 内容要求 |
+| Directory | Purpose | Contents |
 |:---|:---|:---|
-| `data/` | 任务专属数据来源 | 存放本任务所需的原始数据、外部下载数据及任务级中间缓存；不同任务的数据相互隔离，避免跨任务混用 |
-| `output/` | 中间输出文件 | 存放处理过程中生成的所有中间结果、汇总表、统计摘要、缓存文件、备份文件等 |
-| `logs/` | 处理日志 | 存放正在运行或已完成的脚本日志，便于后台监控任务进度、排查问题与复现运行过程 |
-| `pdbs/` | 最终数据集对应的结构文件 | 存放与 `splits/` 中样本对应的蛋白质链结构文件（PDB / mmCIF 格式），作为模型输入的结构源 |
-| `splits/` | 最终数据集划分文件 | **仅包含** `*_train.csv`、`*_val.csv`、`*_test.csv` 三个最终划分文件 |
-| `scripts/` | 处理脚本 | 存放完成该任务数据处理流程的所有脚本文件，脚本命名应能反映执行阶段与功能 |
+| `data/` | Task-specific sources | Raw/downloaded data and task caches; isolate tasks to avoid cross-task mixing |
+| `output/` | Intermediate outputs | Processing results, summary tables/statistics, caches, and backups |
+| `logs/` | Processing logs | Running/completed script logs for background monitoring, diagnosis, and reproduction |
+| `pdbs/` | Final structures | PDB/mmCIF chain structures corresponding to split samples and used as model inputs |
+| `splits/` | Final dataset splits | **Only** final `*_train.csv`, `*_val.csv`, `*_test.csv` |
+| `scripts/` | Processing scripts | All task-processing scripts; filenames indicate stage and function |
 
-> **注意**：`data/`、`output/`、`logs/` 存放的是过程数据与日志；`pdbs/` 与 `splits/` 存放的是可直接用于模型训练与评测的最终产物。
+> data/output/logs contain process artifacts; pdbs/splits contain final products ready for training/evaluation.
 
-## 2. 数据集划分输出路径
+## 2. Split output paths
 
-所有任务的最终数据集划分文件统一输出到任务目录下的 `splits/` 文件夹：
-
-```
-{task_dir}/splits/
-```
-
-例如：
+All final splits go in `{task_dir}/splits/`, e.g.:
 
 - `fold_classification/splits/`
 - `func_prediction/splits/`
 - `ppi_prediction/splits/`
 
-> `func_prediction/splits/` 需同时放置 `ec_*.csv` 与 `go_{bp,cc,mf}_*.csv`。
+> func_prediction/splits/ contains both ec_*.csv and go_{bp,cc,mf}_*.csv.
 
-### 2.1 文件命名
+### 2.1 Filenames
 
-| 集合 | 文件名 |
+| Split | Filename |
 |:---|:---|
-| 训练集 | `{task_name}_train.csv` |
-| 验证集 | `{task_name}_val.csv` |
-| 测试集 | `{task_name}_test.csv` |
+| Train | `{task_name}_train.csv` |
+| Validation | `{task_name}_val.csv` |
+| Test | `{task_name}_test.csv` |
 
-`splits/` 目录下**仅包含**上述三个最终划分文件，不得存放中间文件。
+Only the three final split files belong in splits/, never intermediates.
 
-## 3. 数据集划分文件格式
+## 3. Split format
 
-### 3.1 通用列结构
+### 3.1 Core columns
 
-所有划分文件必须包含以下核心列：
-
-| 字段 | 类型 | 说明 |
+| Field | Type | Description |
 |------|------|------|
-| `unique_id` | string | 样本唯一标识。单链任务通常为 `{pdb_id}_{chain}` 或 CATH 域 ID；PPI 任务为蛋白对组合 ID |
-| `aa_seq` | string | 蛋白链氨基酸序列（单链任务）或对应蛋白序列。多链蛋白可用 `|` 分隔各链序列，下游工具使用时应先去除该分隔符。PPI 等 pair-level 任务改用 `aa_seq1`/`aa_seq2` |
-| `struct_file` | string | 结构文件名，**仅文件名、不含目录**（如 `7E3T_A.pdb`），文件位于本任务的 `pdbs/`；扩展名（`.pdb` / `.cif`）即结构文件类型。PPI 等 pair-level 任务改用 `struct_file1`/`struct_file2` |
-| `label` | string | **强制保存为字符串**，任务相关标签。多标签用 `;` 分隔；per-residue 标签以数组字符串形式保存 |
+| `unique_id` | string | Unique sample identifier. Single-chain tasks typically use `{pdb_id}_{chain}` or CATH domain ID; PPI uses a protein-pair ID |
+| `aa_seq` | string | Protein/chain amino-acid sequence. Multichain proteins may separate chains with `\|`; remove separators for downstream tools. Pair tasks use aa_seq1/aa_seq2 |
+| `struct_file` | string | **Filename only**, no directory, e.g. 7E3T_A.pdb in task pdbs/. Extension .pdb/.cif determines format. Pair tasks use struct_file1/struct_file2 |
+| `label` | string | **Must be stored as a string**. Semicolon-separated multilabel targets; array strings for residue labels |
 
-### 3.2 按任务类型的扩展列
+### 3.2 Task-specific extensions
 
-#### 单链单标签任务（如 fold_classification）
-
-```
-unique_id, aa_seq, struct_file, label
-```
-
-#### 单链多标签任务（如 EC、GO）
+#### Single-chain single-label tasks: e.g. fold_classification
 
 ```
 unique_id, aa_seq, struct_file, label
 ```
 
-- `label` 为多个标签，用英文分号 `;` 分隔
-- 示例：
-  - EC：`2.7.6.-;3.1.7.-`
-  - GO：`GO:0006164;GO:0006189`
+#### Single-chain multilabel tasks: EC/GO
 
-#### Pair-level 任务（如 PPI）
+```
+unique_id, aa_seq, struct_file, label
+```
 
-| 字段 | 类型 | 说明 |
+- Separate multiple labels with ASCII semicolon `;`.
+- EC example: `2.7.6.-;3.1.7.-`.
+- GO example: `GO:0006164;GO:0006189`.
+
+#### Pair-level tasks: PPI
+
+| Field | Type | Description |
 |------|------|------|
-| `unique_id` | string | 蛋白对唯一标识 |
-| `protein_A_id` / `protein_B_id` | string | 蛋白 A / B 的标识符（如 UniProt ID） |
-| `aa_seq1` / `aa_seq2` | string | 蛋白 A / B 的氨基酸序列 |
-| `struct_file1` / `struct_file2` | string | 蛋白 A / B 的结构文件名（仅文件名，位于 `pdbs/`） |
-| `label` | int/string | 相互作用标签，`1` 表示有相互作用，`0` 表示无 |
+| `unique_id` | string | Unique protein-pair ID |
+| `protein_A_id` / `protein_B_id` | string | Protein A/B identifiers, e.g. UniProt |
+| `aa_seq1` / `aa_seq2` | string | Protein A/B sequences |
+| `struct_file1` / `struct_file2` | string | Structure filenames only, in pdbs/ |
+| `label` | int/string | Interaction: 1=yes, 0=no |
 
-#### Per-residue 任务（如 secondary structure prediction）
+#### Residue-level tasks: secondary structure prediction
 
 ```
 unique_id, aa_seq, struct_file, label
 ```
 
-- `label` 为与 `aa_seq` **逐残基对齐**的标签数组，以字符串形式保存
-- **数组序列化统一为方括号包裹、单个空格分隔的整数**：`[v1 v2 v3 ... vn]`（如 `[0 0 1 0 -1]`），**不使用逗号分隔**；未解析/缺失残基以 `-1` 掩码
-- 必须保证 `len(label) == len(aa_seq)`
+- Label arrays must **align residue by residue** to aa_seq and be stored as strings.
+- **Serialize bracketed, single-space-separated integers**, `[v1 v2 v3 ... vn]`, e.g. `[0 0 1 0 -1]`; **no commas**. Mask unresolved/missing residues with -1.
+- Require `len(label) == len(aa_seq)`.
 
-#### 配体相关任务（如 kcat / LBA / LBS）
+#### Ligand-related tasks: kcat/LBA/LBS
 
-在核心列之外携带配体专属特征列，`ligand_smiles`、`ligand_ecfp4`
+Add ligand_smiles and ligand_ecfp4 to core columns.
 
-### 3.3 OOD 标记列（仅测试集）
+### 3.3 OOD flags: test only
 
-测试集 `*_test.csv` 必须在通用列之后追加 OOD 标记列，取值为布尔值 `True` / `False`（极端长度样本的非长度维度 OOD 列可为 `NaN`，见 3.4）。
+Append boolean True/False OOD columns to test CSVs after core columns. Non-length OOD columns for extreme-length samples may be NaN (§3.4).
 
-| 列名 | 说明 |
+| Column | Description |
 |------|------|
-| `Default` | 没有通过 OOD-ExtremeLength 提前去除的常规测试集样本 |
-| `seq_Redundancy_90` ~ `seq_Redundancy_30` | 序列同源性 OOD，步长 10% |
-| `TM-score_0.9` ~ `TM-score_0.3` | 结构相似性 OOD，步长 0.1 |
-| `OOD_Orphan` | 在 Train+Val 中无显著同源 hit |
-| `OOD_ExtremeShort` / `OOD_ExtremeLong` | 极端长度 OOD（单链 < 60 / > 1000） |
-| `OOD_IDR` | 高内在无序区域比例 |
-| `OOD_FoldHoldout` | 折叠类型留一法（CATH 拓扑） |
-| `OOD_SuperfamilyHoldout` | 超家族留一法（CATH 超家族） |
-| `OOD_NewEC_L4` / `OOD_NewEC_L3` / `OOD_NewEC_L1` | 新 EC 功能类别，后缀表示 EC 层级：`L4`=4 级完整 EC 编号、`L3`=3 级、`L1`=一级大类 |
-| `OOD_LongTail` | 训练集中低频出现的**预测标注**类别（该任务自身要预测的标签，如 CATH 架构、GO/EC 标签、二级结构、界面/结合位点比例等） |
-| `OOD_LongTail_EC_L4` / `OOD_LongTail_EC_L3` | 训练集中低频出现的 **EC 功能**类别（用作非 EC 预测任务的 OOD 维度），后缀表示 EC 层级 |
-| `OOD_Combinatorial` | 组合泛化 OOD（标签组合未在 Train+Val 出现） |
-| `InD` | 纯 in-distribution 标识：所有 `OOD_*` + `seq_Redundancy_*` + `TM-score_*` 标记均为 False（NaN 视为 False）时为 True；旧名 `Pure_ID`，统一由 `.skills/ood-annotation-toolkit/scripts/finalize_ood_columns.py --mode ind` 在所有 OOD 列齐备后重算 |
+| `Default` | Regular test samples not preselected by extreme-length filtering |
+| `seq_Redundancy_90`–`seq_Redundancy_30` | Sequence homology OOD, 10% steps |
+| `TM-score_0.9`–`TM-score_0.3` | Structural similarity OOD, 0.1 steps |
+| `OOD_Orphan` | No significant train+val homologous hit |
+| `OOD_ExtremeShort` / `OOD_ExtremeLong` | Extreme chain length <60 / >1000 |
+| `OOD_IDR` | High intrinsic-disorder fraction |
+| `OOD_FoldHoldout` | Held-out fold/CATH topology |
+| `OOD_SuperfamilyHoldout` | Held-out CATH superfamily |
+| `OOD_NewEC_L4` / `OOD_NewEC_L3` / `OOD_NewEC_L1` | Unseen EC functions; suffix indicates full level 4, level 3, or top-level class |
+| `OOD_LongTail` | Infrequent training **prediction-label** classes for the task itself: CATH architecture, GO/EC, secondary structure, interface/binding-site ratios, etc. |
+| `OOD_LongTail_EC_L4` / `OOD_LongTail_EC_L3` | Infrequent training **EC function** classes, including as OOD dimensions for non-EC tasks; suffix indicates EC level |
+| `OOD_Combinatorial` | Label combinations absent from train+val |
+| `InD` | All OOD_*, seq_Redundancy_*, TM-score_* False, treating NaN as False. Formerly Pure_ID; recompute with toolkit finalize_ood_columns.py --mode ind after all OOD columns are ready |
 
-> **OOD 标注 skills**：各 OOD 列的统一口径与通用脚本分别固化在四个 skill 中——`homology-ood-annotation`（seq_Redundancy_*/OOD_Orphan/TM-score_*）、`cath-ted-domain-annotation`（OOD_FoldHoldout/OOD_SuperfamilyHoldout）、`ec-function-ood-annotation`（OOD_NewEC_*/OOD_LongTail_EC_*）、`ood-annotation-toolkit`（OOD_IDR、值域 bin LongTail、Default=False→NaN 收尾、InD 重算、splits 体检）。新增或重算 OOD 列时必须调用对应 skill 的脚本，不得另起口径。
+> **OOD annotation skills:** canonical definitions and tools reside in homology-ood-annotation (seq/Orphan/TM), cath-ted-domain-annotation (fold/superfamily), ec-function-ood-annotation (NewEC/LongTailEC), and ood-annotation-toolkit (IDR, value-bin LongTail, NaN/InD finalization, split audit). Call the corresponding scripts when adding/recomputing columns rather than inventing separate definitions.
 
-> **阈值变体**：个别任务对同一维度保留多个阈值列时以阈值后缀区分，例如 enzyme_optimal_ph 的 `OOD_LongTail_EC_L3_le5` / `OOD_LongTail_EC_L3_le10`（EC L3 频次 ≤5 / ≤10）与 `OOD_LongTail_pHbin_le50` / `OOD_LongTail_pHbin_le100`（pH 区间样本数 ≤50 / ≤100，属预测标签长尾）。
+> **Threshold variants:** use suffixes for multiple thresholds, e.g. optimal_ph OOD_LongTail_EC_L3_le5/le10 (EC L3 frequencies ≤5/≤10) and OOD_LongTail_pHbin_le50/le100 (pH-bin counts ≤50/≤100, prediction-label tails).
 
-### 3.4 `Default` 列定义与处理逻辑
+### 3.4 Default semantics
 
-`Default` 列用于标识**常规测试集样本**（即未通过极端长度筛选提前移除的样本），是 OOD 评估的基准子集。
+Default identifies **regular test samples**, not preselected for extreme length, and serves as the baseline evaluation subset.
 
-#### 定义规则（按任务类型区分）
-
-| 任务类型 | `Default=True` 定义 | `Default=False` 定义 | 说明 |
+| Task type | Default=True | Default=False | Notes |
 |:---|:---|:---|:---|
-| **LBA（ligand_binding_affinity）** | 所有测试集样本 | 无 | 训练集/验证集保留极端长度样本，测试集不做极端长度剔除，所有样本均为 Default=True |
-| **PPI（ppi_prediction）** | 双链长度均 ≤1000 的常规样本 | 任一链 > 1000 的样本 | 划分前将含 >1000aa 单链的样本预挑出直入 test 作 `OOD_ExtremeLong`（`Default=False`）；train/val 单链 ≤1000 |
-| **其他所有任务** | 长度在 [60, 1000] 范围内的正常长度样本 | 长度 < 60 或 > 1000 的极端长度样本 | 划分前或划分后已将极端长度样本从 train/val 移至 test 或单独作为 OOD 子集 |
+| **LBA** | All test samples | None | Train/val retain extreme lengths; test does not exclude them |
+| **PPI** | Both chains ≤1000 | Either chain >1000 | Preselect pairs containing >1000-aa chains into test as OOD_ExtremeLong; train/val chains ≤1000 |
+| **All other tasks** | Length in [60,1000] | Length <60 or >1000 | Extreme samples moved from train/val to test before/after splitting, or reserved as separate OOD subsets |
 
-#### 极端长度样本的处理要求（适用于所有含 `Default=False` 行的任务；LBA 无此类行）
+#### Extreme-length requirements: tasks with Default=False rows; not LBA
 
-当 `Default=False`（即样本为极端长度预挑出）时，必须满足以下约束：
+1. **Other OOD flags become NaN.** These samples do not participate in sequence/structure/IDR or other OOD computations. Preserve only the triggering OOD_ExtremeShort/OOD_ExtremeLong reason flag; use NaN rather than False elsewhere.
+2. **Exclude from ID-Test statistics.** Default=False samples are not counted as in-distribution test data.
+3. **Evaluate separately** as OOD_ExtremeLength/Long/Short subsets.
 
-1. **其他 OOD 标记列设为 `NaN`**：极端长度样本不参与序列同源性、结构相似性、IDR 等其他 OOD 维度的计算，除其极端长度原因列（`OOD_ExtremeShort` / `OOD_ExtremeLong`，即触发预挑出的那一列）外，对应列统一设为 `NaN`，与 `False` 区分。
-2. **不参与 ID-Test 统计**：`Default=False` 的样本不计入 in-distribution 测试集。
-3. **单独评估**：极端长度样本作为独立的 `OOD_ExtremeLength` / `OOD_ExtremeLong` / `OOD_ExtremeShort` 子集进行专门评估。
+> PPI preselects pairs with a >1000-aa chain into test: Default=False, ExtremeLong=True, 1,325 rows. Other flags, including seq/TM/ExtremeShort, are NaN since 2026-08-27; historically seq/TM were computed for all rows. LBA uses Default=True throughout.
 
-> **注意**：PPI 任务对含 >1000aa 单链的样本做"预挑出直入 test"处理（`Default=False`、`OOD_ExtremeLong=True`，1,325 行），其 `seq_Redundancy_*` / `TM-score_*` / `OOD_ExtremeShort` 等其余 OOD 列均为 NaN（2026-08-27 起与其他任务统一，此前曾对全行计算 seq/TM）；LBA 任务则全表 `Default=True`。
+#### Hard exclusion: single chains >2000 aa
 
-#### 超长蛋白硬性剔除（单链长度 > 2000）
+In addition to flagging/moving extreme samples, **remove every sample containing a chain longer than 2000 aa from all splits**, rather than retaining it as an OOD subset. Very long sequences/structures impose memory/processing costs and lie in the extreme distribution tail, unsuitable for routine evaluation.
 
-除上述"标记/移至 test"的极端长度处理外，**单链氨基酸序列长度 > 2000 的样本一律直接从数据集中剔除**（train / val / test 全部移除，既不保留也不作为 OOD 子集）。理由：超长序列/结构会带来显存与处理成本问题，且属于分布极端尾部，不适合纳入常规评测。
+- Unit: individual chain length; for paired tasks **either chain** >2000 removes the pair.
+- Applies to all tasks.
 
-- 判定单位：单条链的氨基酸序列长度（对 PPI 等 pair-level 任务，**任意一条链** > 2000 即剔除整个样本）。
-- 适用范围：所有任务。
+### 3.5 Constraints
 
-### 3.5 关键约束
+1. **Store label as string**, avoiding floating-point interpretation of 1.10 or 3.2.1.-.
+2. **Complete test annotations:** every OOD flag has an explicit value, not an unspecified missing value.
+3. **Identifiable ID-Test:** test samples with no OOD flags form the in-distribution subset.
+4. **No unique_id overlap** between train/val/test.
 
-1. **`label` 必须保存为字符串类型**：避免 `1.10`、`3.2.1.-` 等被解析为浮点数导致精度丢失。
-2. **测试集 OOD 列必须完整**：每个测试样本的所有 OOD 标记都必须有明确值，不允许缺失。
-3. **ID-Test 可识别**：未标记为任何 OOD 的测试样本即为 in-distribution 测试集（ID-Test）。
-4. **Train / Val / Test 之间 `unique_id` 不得重复**。
+## 4. Standard OOD definitions
 
-## 4. 标准 OOD 测试集定义
-
-| OOD 类型 | 定义 | 工具/方法 | 阈值/规则 | 科学意义 |
+| Type | Definition | Tool | Threshold/rule | Scientific purpose |
 |:---|:---|:---|:---|:---|
-| **OOD-LowHomology** | 测试样本与 train+val 的最大序列 identity 低于阈值 | mmseqs2 search | **< 90**、< 80、< 70、< 60、< 50、< 40、< 30 | 评估序列相似度降低时的泛化能力 |
-| **OOD-Orphan** | 测试样本在 train+val 中无显著同源 hit | mmseqs2 search | max identity = 0（或 e-value > 1e-3） | 评估完全无同源训练样本的泛化能力 |
-| **OOD-FamilyHoldout** | 按蛋白质家族留一法划分 | CATH / SCOPe / Pfam / ECOD | 留一法 | 评估对未见蛋白家族的泛化能力 |
-| **OOD-SuperfamilyHoldout** | 按蛋白质超家族留一法划分 | 同上 | 留一法 | 评估远同源识别能力 |
-| **OOD-NewFold** | 测试样本与 train+val 的最大结构相似度低于阈值 | Foldseek | **< 0.9**、< 0.8、< 0.7、< 0.6、< 0.5、< 0.4、< 0.3 | 评估结构折叠空间上的泛化能力 |
-| **OOD-FoldHoldout** | 按折叠类型留一法划分 | CATH / SCOPe / ECOD | 留一法 | 评估对未见结构折叠的泛化能力 |
-| **OOD-IDR** | 测试样本含有显著的内在无序区域 | metapredict v3 / flDPnn / IUPred | 连续 disorder propensity > 0.5 区域占序列长度 > 30% | 评估对富含无序区域蛋白的预测能力 |
-| **OOD-ExtremeLength** | 长度处于分布两端的蛋白 | 长度统计 | length < 60 或 length > 1000 | 评估对极端长度样本的鲁棒性 |
-| **OOD-NewFunction** | 按功能类别留一法划分 | EC / GO / InterPro | 留一法 | 评估对未见功能类别的泛化能力 |
-| **OOD-LongTailFunction** | 测试样本带有 train 中低频的**功能类别**标签 | EC / GO / InterPro 标签频次统计 | EC 类别出现次数 **< 10**（可随任务调整） | 评估长尾功能类别预测能力 |
-| **OOD-LongTail** | 测试样本带有 train 中低频的**预测标注**类别 | 标签频次统计 | 某标注类别样本数 **< 10** | 评估数据集预测标注的长尾泛化能力 |
-| **OOD-CombinatorialFunction** | 测试样本标签组合未在 train+val 中出现 | 多标签组合统计 | 标签对 `(A, B)` 未在 train+val 中同时出现 | 评估组合泛化能力 |
+| **LowHomology** | Maximum test-to-train+val sequence identity below threshold | mmseqs2 search | **<90**, <80, <70, <60, <50, <40, <30 | Generalization with decreasing sequence similarity |
+| **Orphan** | No significant train+val homolog | mmseqs2 search | Max identity=0 or e-value >1e-3 | Generalization without homologous training examples |
+| **FamilyHoldout** | Held-out protein families | CATH/SCOPe/Pfam/ECOD | Group holdout | Unseen-family generalization |
+| **SuperfamilyHoldout** | Held-out superfamilies | Same as above | Group holdout | Remote homology recognition |
+| **NewFold** | Maximum structural similarity below threshold | Foldseek | **<0.9**, <0.8, <0.7, <0.6, <0.5, <0.4, <0.3 | Fold-space generalization |
+| **FoldHoldout** | Held-out fold types | CATH/SCOPe/ECOD | Group holdout | Unseen structural folds |
+| **IDR** | Substantial intrinsic disorder | metapredict v3/flDPnn/IUPred | Regions with disorder >0.5 cover >30% of sequence | Disorder-rich proteins |
+| **ExtremeLength** | Protein lengths in distribution tails | Length statistics | <60 or >1000 | Extreme-length robustness |
+| **NewFunction** | Held-out function classes | EC/GO/InterPro | Group holdout | Unseen functions |
+| **LongTailFunction** | Infrequent training **functional** labels | EC/GO/InterPro frequencies | EC count **<10**, adjustable by task | Long-tail functions |
+| **LongTail** | Infrequent training **prediction labels** | Label frequencies | Class count **<10** | Prediction-label tail generalization |
+| **CombinatorialFunction** | Unseen test label combinations | Multilabel combination statistics | Pair (A,B) never co-occurs in train+val | Compositional generalization |
 
-## 5. DATA_PROCESS.md 写作标准
+## 5. DATA_PROCESS.md standards
 
-### 5.1 文档顶层结构
+### 5.1 Top-level structure
 
 ```markdown
-# 标题（任务名称 + "数据集处理文档"）
-> 简述文档目的与处理位置
+# Task name + Dataset Processing
+> Purpose and processing location
 
 ---
 
-## Stage N: 阶段名称（阶段目标简述）
-> 阶段目标声明
+## Stage N: Name and objective
+> Objective statement
 
-### N.M 子步骤名称
-#### N.M.K 更细粒度操作（如需要）
+### N.M Substep
+#### N.M.K Finer-grained operation, if needed
 
 ---
 
-### X. 输出文件汇总
-### X+1. 各维度统计汇总
-### X+2. 注意事项
+### X. Output files
+### X+1. Dimension statistics
+### X+2. Notes
 ```
 
-### 5.2 每个 Stage 必须包含
+### 5.2 Required stage content
 
-1. **项目/步骤概述**：核心任务和科学依据
-2. **核心数据规模**：首次出现时必填，关键数字加粗
-3. **数据来源**：输入文件表格（路径、用途、说明）
-4. **处理步骤**：每个步骤包含目的、方法、脚本路径、结果
-5. **验证与质控**：验证方法、指标分布、异常解释
+1. **Overview:** core task and scientific rationale.
+2. **Scale:** required at first mention; bold key numbers.
+3. **Sources:** input-file table with paths, purposes, and notes.
+4. **Steps:** purpose, method, script path, and results per step.
+5. **Validation:** methods, metric distributions, and anomaly explanations.
 
-### 5.3 表格使用规范
+### 5.3 Required tables
 
-必须使用表格的场景：
-- 数据规模统计
-- 文件清单
-- 筛选条件
-- 对比结果
-- OOD 划分结果
+Use tables for dataset scale, file inventories, filtering conditions, comparisons, and OOD split results.
 
-### 5.4 脚本与工具记录
+### 5.4 Script/tool records
 
-每次调用脚本必须记录：
-- 路径：`scripts/script_name.py`
-- 用途：一句话说明
-- 关键参数：并发数、阈值、模式
-- 结果：成功/失败数量，耗时
+Record each script's path (scripts/script_name.py), one-sentence purpose, key parameters (concurrency/threshold/mode), success/failure counts, and runtime.
 
-使用外部工具时必须记录：
-- 工具名称及版本
-- 核心参数
-- 比对方向
-- 判定指标
+For external tools record name/version, core parameters, search direction, and decision metric.
 
-### 5.5 数据质量检查
+### 5.5 Quality control
 
-必须包含独立的**数据质量检查**章节：
-1. **泄露检查**：Train ∩ Val、Train ∩ Test、Val ∩ Test 是否为空
-2. **分布一致性**：长度、分辨率、类别分布等关键特征对比
-3. **异常值处理**：列出被移除的异常样本及原因
+Include a separate **Data quality checks** section:
 
-### 5.6 输出文件记录
+1. **Leakage:** whether pairwise train/val/test intersections are empty.
+2. **Distribution consistency:** compare length, resolution, class distributions, and other key features.
+3. **Outliers:** list removed samples and reasons.
 
-每个 Stage 末尾列出输出文件：
-- 位置
-- 文件名
-- 行数/大小
-- 格式
-- 说明
+### 5.6 Output records
 
-## 6. 文本与数字风格
+At each stage's end list output location, filename, row count/size, format, and description.
 
-| 规范项 | 要求 |
+## 6. Text and number style
+
+| Item | Requirement |
 |:---|:---|
-| 语言 | 与项目主体语言保持一致 |
-| 数字格式 | 千分位逗号分隔；百分比保留 1 位小数 |
-| 加粗强调 | 关键结论、核心数字、推荐阈值、重要警告使用加粗 |
-| 代码/路径 | 文件路径、脚本名、列名、字段值用反引号包裹 |
-| 科学名称 | mmseqs2、Foldseek、PDB、UniProt 等保持原样 |
+| Language | Match the project's main language |
+| Numbers | Thousands separators; one decimal for percentages |
+| Bold | Key conclusions, central numbers, recommended thresholds, and important warnings |
+| Code/paths | Backticks around paths, scripts, columns, and field values |
+| Scientific names | Preserve mmseqs2, Foldseek, PDB, UniProt, etc. |
 
-## 7. 快速检查清单
+## 7. Checklist
 
-在 `DATA_PROCESS.md` 完成前，逐项确认：
+Before finalizing DATA_PROCESS.md:
 
-- [ ] 文档头部包含处理位置说明
-- [ ] 各 Stage 开头有目标声明
-- [ ] 所有数据规模变化均有表格记录（输入 → 输出）
-- [ ] 使用的脚本均已标注路径和参数
-- [ ] 外部工具已记录版本和核心参数
-- [ ] OOD 划分包含定义、工具、阈值、规模、科学意义
-- [ ] 数据泄露检查已执行并记录结果
-- [ ] 异常值/过滤样本已列出
-- [ ] 输出文件清单完整（含路径、格式、大小）
-- [ ] 关键字段/列已说明类型和含义
-- [ ] 数据集划分文件符合 `{task_dir}/splits/` 格式规范
-- [ ] `splits/` 目录下仅包含 train / val / test 三个最终划分文件
-- [ ] 任务目录下 `data/` / `output/` / `logs/` / `pdbs/` / `splits/` / `scripts/` 组织符合规范
-- [ ] 训练集/验证集不含 OOD 列，测试集包含完整 OOD 标记
-- [ ] `Default` 列定义符合任务类型（LBA 全 True；PPI 含 >1000aa 链预挑出为 False；其他任务按极端长度区分）
-- [ ] 极端长度样本（`Default=False`）的其他 OOD 列已设为 `NaN` 或 `False`
-- [ ] `label` 列已强制保存为字符串类型
-- [ ] 注意事项涵盖已知问题和特殊处理
-- [ ] 设计意图对非显然策略做了说明
+- [ ] Header states processing location.
+- [ ] Every stage opens with an objective.
+- [ ] Tables record all scale changes, input→output.
+- [ ] Script paths and parameters are documented.
+- [ ] External tool versions and key parameters are recorded.
+- [ ] OOD splits state definitions, tools, thresholds, scale, and scientific purpose.
+- [ ] Leakage checks and results are recorded.
+- [ ] Outliers/filtered samples are listed.
+- [ ] Complete output inventory includes paths, formats, and sizes.
+- [ ] Key fields/columns have types and meanings.
+- [ ] Split files conform to `{task_dir}/splits/`.
+- [ ] splits/ contains only final train/val/test files.
+- [ ] data/output/logs/pdbs/splits/scripts follow directory standards.
+- [ ] Train/val have no OOD columns; test has all flags.
+- [ ] Default matches task type: LBA all True; PPI preselected >1000-aa chains False; others by extreme length.
+- [ ] Other OOD flags on Default=False extreme rows are NaN or False.
+- [ ] label is stored as string.
+- [ ] Notes cover known issues and special handling.
+- [ ] Non-obvious strategies have design explanations.

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-建立 DIPS-Plus pair 文件索引。
+Build an index of DIPS-Plus pair files.
 
-扫描 final/raw/ 目录下的 dill/hdf5 pair 文件，提取关键元数据，
-并尝试读取官方划分列表（pairs-postprocessed-*.txt）。
+Scan dill/HDF5 pairs under final/raw/ and extract key metadata;
+also try to read official split lists (pairs-postprocessed-*.txt).
 
-用法：
+Usage:
     python scripts/build_pair_index.py
 """
 
@@ -41,7 +41,7 @@ DIPS_RAW_DIR_CANDIDATES = [
 
 
 def find_raw_dir():
-    """定位 final/raw/ 目录。"""
+    """Locate final/raw/."""
     for cand in DIPS_RAW_DIR_CANDIDATES:
         if cand.exists() and any(cand.iterdir()):
             logger.info("Located raw pair directory: %s", cand)
@@ -50,19 +50,19 @@ def find_raw_dir():
 
 
 def extract_pdb_info(filename):
-    """从 pair 文件名推断 PDB ID 与模型信息。
+    """Infer PDB ID and model information from a pair filename.
 
-    DIPS-Plus v1.3.0 文件名形如：
+    DIPS-Plus v1.3.0 filenames have the form:
         1ad1.pdb1_0.dill
         2ad7.pdb1_2.hdf5
-    其中 1ad1 为 PDB ID，pdb1 为 model 编号，_0/_2 为 pair 索引。
+    Here 1ad1 is the PDB ID, pdb1 is the model, and _0/_2 is the pair index.
     """
     stem = Path(filename).stem
-    # 匹配 4 字符 PDB ID + .pdb + model + _ + pair_index
+    # Match four-character PDB ID + .pdb + model + _ + pair_index.
     m = re.match(r"([0-9][a-z0-9]{3})\.pdb(\d+)_(\d+)", stem, re.IGNORECASE)
     if m:
         return m.group(1).lower(), m.group(2), m.group(3)
-    # 兜底：仅匹配 PDB ID
+    # Fallback: match the PDB ID only.
     m = re.match(r"([0-9][a-z0-9]{3})", stem, re.IGNORECASE)
     if m:
         return m.group(1).lower(), "", ""
@@ -70,10 +70,10 @@ def extract_pdb_info(filename):
 
 
 def scan_pair_files(raw_dir):
-    """扫描 pair 文件，优先保留 HDF5 格式。"""
+    """Scan pair files, preferring HDF5."""
     records = []
     seen = set()
-    # 优先扫描 HDF5，这样若 dill 与 hdf5 同名，hdf5 会被保留
+    # Scan HDF5 first so it wins when dill and HDF5 share the same name.
     for fmt in ("*.hdf5", "*.h5", "*.dill"):
         for path in raw_dir.rglob(fmt):
             rel = path.relative_to(ROOT)
@@ -95,7 +95,7 @@ def scan_pair_files(raw_dir):
 
 
 def load_official_split_lists(raw_dir):
-    """读取官方划分列表文件。"""
+    """Read official split-list files."""
     splits = {}
     split_files = {
         "train": "pairs-postprocessed-train.txt",
@@ -113,12 +113,12 @@ def load_official_split_lists(raw_dir):
 
 
 def assign_splits(records, splits):
-    """将官方划分标签合并到索引中。
+    """Merge official split labels into the index.
 
-    优先使用最终过滤后的 train/val 列表；before-filter 列表作为补充信息。
+    Prefer final filtered train/val lists; before-filter lists provide supplementary information.
     """
     split_map = {}
-    # 先读 before-filter，再读最终列表，使最终列表覆盖前者
+    # Read before-filter lists first so final lists override them.
     order = ["train_before_filter", "val_before_filter", "test", "train", "val"]
     for split_name in order:
         if split_name not in splits:
@@ -134,7 +134,7 @@ def assign_splits(records, splits):
         rec["official_split"] = split_map.get(rec["unique_id"], "")
         if not rec["official_split"]:
             rec["official_split"] = split_map.get(rec["file_name"], "")
-        # 兼容旧版无扩展名列表
+        # Support legacy extensionless lists.
         if not rec["official_split"]:
             rec["official_split"] = split_map.get(rec["unique_id"].replace(".dill", "").replace(".hdf5", "").replace(".h5", ""), "")
     return records
@@ -154,7 +154,7 @@ def main():
     splits = load_official_split_lists(raw_dir)
     records = assign_splits(records, splits)
 
-    # 保存索引
+    # Save the index.
     index_path = OUTPUT_DIR / "dips_plus_pair_index.csv"
     with open(index_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=records[0].keys())
@@ -162,7 +162,7 @@ def main():
         writer.writerows(records)
     logger.info("Pair index saved to %s", index_path)
 
-    # 划分索引
+    # Split index
     split_records = [
         {"unique_id": r["unique_id"], "file_path": r["file_path"], "split": r["official_split"]}
         for r in records if r["official_split"]
@@ -175,7 +175,7 @@ def main():
             writer.writerows(split_records)
         logger.info("Split index saved to %s", split_path)
 
-    # 统计摘要
+    # Summary statistics
     fmt_counts = {}
     split_counts = {}
     for r in records:

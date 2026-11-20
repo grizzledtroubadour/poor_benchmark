@@ -1,272 +1,268 @@
-# 蛋白质-配体结合亲和力（Ligand Binding Affinity）数据集处理文档
+# Ligand Binding Affinity Dataset Processing
 
-> 任务名称：ligand_binding_affinity（回归，预测 pK = -log10(Kd/Ki)）
-> 数据源：PDBbind+ v2020.R1 免费数据包（https://www.pdbbind-plus.org.cn/download）
-> 处理位置：`datasets/ligand_binding_affinity/`
+> Task: ligand_binding_affinity (regression: pK = -log10(Kd/Ki))
+> Source: free PDBbind+ v2020.R1 distribution (https://www.pdbbind-plus.org.cn/download)
+> Location: `datasets/ligand_binding_affinity/`
 >
-> 本文档描述**从原始数据一次性复现**当前 `splits/` 与 `pdbs/` 的完整线性流程（四阶段结构）。
-> 统计数字与列名均已按当前 `splits/*.csv` 实际表头重算核对（只读）。
+> This document describes the complete four-stage, linear workflow for reproducing the current `splits/` and `pdbs/` from raw data.
+> Statistics and column names were recomputed and checked against the current `splits/*.csv` headers in a read-only audit.
 
-## 任务定义与当前规模
+## Task and current scale
 
-回归任务：由蛋白序列/结构 + 配体 SMILES/ECFP4 预测结合亲和力 pK（`label`，字符串保存，统一 6 位小数）。
+Predict binding affinity pK from protein sequence/structure and ligand SMILES/ECFP4. The target `label` is stored as a string with six decimal places.
 
-| 划分 | 文件 | 样本数 | Kd / Ki | 说明 |
+| Split | File | Samples | Kd / Ki | Notes |
 |:---|:---|---:|:---|:---|
-| 训练集 | `splits/ligand_binding_affinity_train.csv` | 8,366 | 4,638 / 3,728 | 6 列 |
-| 验证集 | `splits/ligand_binding_affinity_val.csv` | 930 | 516 / 414 | 6 列 |
-| 测试集 | `splits/ligand_binding_affinity_test.csv` | 2,367 | 1,684 / 683 | 38 列（含完整 OOD 块） |
-| **合计** | — | **11,663** | — | `pdbs/` 下 11,663 个 `{pdb_id}.pdb` |
+| Train | `splits/ligand_binding_affinity_train.csv` | 8,366 | 4,638 / 3,728 | 6 columns |
+| Validation | `splits/ligand_binding_affinity_val.csv` | 930 | 516 / 414 | 6 columns |
+| Test | `splits/ligand_binding_affinity_test.csv` | 2,367 | 1,684 / 683 | 38 columns, including all OOD annotations |
+| **Total** | — | **11,663** | — | 11,663 `{pdb_id}.pdb` files in `pdbs/` |
 
-整体比例约 **7.2 : 0.8 : 2.0**，train:val ≈ **9 : 1**；test `Default` 全为 True（LBA/PPI 惯例，见 §9 注意事项）。
+Overall ratio: approximately **7.2 : 0.8 : 2.0**; train:val ≈ **9 : 1**. Test `Default` is always True (the LBA/PPI convention; see §9).
 
-数据包说明：**PDBbind v2020.R1**（PDBbind+ 免费 Demo 数据包），结构文件使用 PDBbind v2024 流程重新处理，质量优于旧版 PDBbind-CN v2020。索引文件 `INDEX_general_PL.2020R1.lst`，复合物 19,037（蛋白-配体），无预计算 pK（解析时自行计算）。
+Distribution: **PDBbind v2020.R1**, the free PDBbind+ Demo package. Structures were reprocessed with the PDBbind v2024 pipeline and have improved quality over the old PDBbind-CN v2020 distribution. The index is `INDEX_general_PL.2020R1.lst`, containing 19,037 protein–ligand complexes without precomputed pK; pK is calculated during parsing.
 
-脚本总览（`scripts/`，按执行顺序编号）：
+Scripts in execution order:
 
-| 编号 | 脚本 | 阶段 |
+| No. | Script | Stage |
 |:---|:---|:---|
-| 01 | `01_download_pdbbind2020.sh` | ① 数据包下载与解压 |
-| 02 | `02_parse_index.py` | ① 索引解析 |
-| 03 | `03_clean_metadata.py` | ② 标签清洗（Kd/Ki 筛选） |
-| 04 | `04_parse_ligands.py` | ② 配体解析（SMILES + ECFP4） |
-| 05 | `05_extract_protein_sequences.py` | ③ 按链蛋白序列提取（`\|` 分隔） |
-| 06 | `06_build_dataset_csv.py` | ③ 样本级数据集落盘 |
-| 07 | `07_copy_whole_protein_pdbs.py` | ③ 整蛋白结构落盘 |
-| 08 | `08_cluster_time_split.py` | ④ 配体聚类 + 簇内时间切分 + 比例平衡 |
-| 09 | `09_format_splits_to_skill.py` | ④ 统一 schema 格式化 + 序列同源 OOD |
-| 10 | `10_compute_structure_idr_ood.py` | ④ 结构相似 + IDR OOD |
-| 11 | `11_ted_augment_cath_ood.py` | ④ CATH+TED Fold/Superfamily Holdout |
-| 12 | `12_add_value_bin_longtail_ood.py` | ④ 值域 AffBin LongTail OOD |
+| 01 | `01_download_pdbbind2020.sh` | ① Download and extract archives |
+| 02 | `02_parse_index.py` | ① Parse index |
+| 03 | `03_clean_metadata.py` | ② Clean labels and retain Kd/Ki |
+| 04 | `04_parse_ligands.py` | ② Parse ligands: SMILES + ECFP4 |
+| 05 | `05_extract_protein_sequences.py` | ③ Extract sequences by chain, separated by `\|` |
+| 06 | `06_build_dataset_csv.py` | ③ Write sample-level dataset |
+| 07 | `07_copy_whole_protein_pdbs.py` | ③ Write whole-protein structures |
+| 08 | `08_cluster_time_split.py` | ④ Ligand clustering, within-cluster temporal splitting, and ratio balancing |
+| 09 | `09_format_splits_to_skill.py` | ④ Unified schema and sequence-homology OOD |
+| 10 | `10_compute_structure_idr_ood.py` | ④ Structural similarity and IDR OOD |
+| 11 | `11_ted_augment_cath_ood.py` | ④ CATH+TED fold/superfamily holdouts |
+| 12 | `12_add_value_bin_longtail_ood.py` | ④ Affinity-bin long-tail OOD |
 
 ---
 
-## 阶段一：源数据获取与解析
+## Stage 1: Obtain and parse source data
 
-### 1.1 数据包下载与解压
+### 1.1 Download and extract archives
 
-**脚本**：`scripts/01_download_pdbbind2020.sh`
-**输入**：`data/index.tar.gz`、`data/P-L.tar.gz`（手动放入）
-**输出**：`data/index/INDEX_general_PL.2020R1.lst`、`data/P-L/{1981-2000,2001-2010,2011-2019}/{pdb_id}/`
+**Script:** `scripts/01_download_pdbbind2020.sh`<br>
+**Input:** manually downloaded `data/index.tar.gz` and `data/P-L.tar.gz`<br>
+**Output:** `data/index/INDEX_general_PL.2020R1.lst` and `data/P-L/{1981-2000,2001-2010,2011-2019}/{pdb_id}/`
 
 ```bash
 cd ligand_binding_affinity
 bash scripts/01_download_pdbbind2020.sh
 ```
 
-解压后每个样本目录含 `{pdb_id}_protein.pdb`、`{pdb_id}_ligand.mol2`、`{pdb_id}_ligand.sdf`、`{pdb_id}_pocket.pdb`。
+Each extracted sample directory contains `{pdb_id}_protein.pdb`, `{pdb_id}_ligand.mol2`, `{pdb_id}_ligand.sdf`, and `{pdb_id}_pocket.pdb`.
 
-### 1.2 索引解析
+### 1.2 Parse index
 
-**脚本**：`scripts/02_parse_index.py`
-**输入**：`data/index/INDEX_general_PL.2020R1.lst`
-**输出**：`output/pdbbind_v2020_metadata.csv`（19,037 条，解析失败 0；亲和力类型 Kd / Ki / IC50，pK = -log10(affinity_value) 在此计算）
-
----
-
-## 阶段二：标签聚合与计算
-
-### 2.1 标签清洗（Kd/Ki 筛选）
-
-**脚本**：`scripts/03_clean_metadata.py`
-**输入**：`output/pdbbind_v2020_metadata.csv`
-**输出**：`output/pdbbind_v2020_metadata_cleaned.csv`（+ `_stats.json`）
-
-排除规则：
-
-1. `affinity_type == IC50`
-2. `affinity_operator` 为 `<`、`<=`、`~` 等不等号
-3. 注释标记 `[Incomplete ligand]`
-4. 注释标记 `[Covalent complex]`
-5. 注释标记 `[Different protein in assay]`
-6. 注释标记 `[Different ligand in assay]`
-
-> 关于 `[Uncommon element]`：指配体中含有不常见元素（如硼、金属等）。本次未排除，共保留 96 条，后续若模型对元素类型敏感可再处理。
-
-| 项目 | 数值 |
-|------|------|
-| 清洗前 | 19,037 |
-| 清洗后 | **11,664**（Kd 6,839 / Ki 4,825） |
-| 保留率 | 61.3% |
-
-### 2.2 配体解析（SMILES + ECFP4）
-
-**脚本**：`scripts/04_parse_ligands.py`
-**输入**：`output/pdbbind_v2020_metadata_cleaned.csv`
-**输出**：`output/pdbbind_v2020_metadata_ligand.csv`（+ `_stats.json`、`ligand_parse_failures.csv`）
-
-- 优先读取 `{pdb_id}_ligand.sdf`，失败则回退到 `{pdb_id}_ligand.mol2`；
-- RDKit 生成：`ligand_smiles`（isomeric canonical SMILES）、`ligand_ecfp4`（ECFP4/Morgan 指纹，radius=2，nBits=2048，保存为 ON-bits 列表）、`ligand_num_heavy_atoms`。
-
-| 项目 | 数值 |
-|------|------|
-| 输入 | 11,664 |
-| 解析成功 | **11,663**（`2pll` 失败，剔除） |
-| 解析失败 | 1 |
+**Script:** `scripts/02_parse_index.py`<br>
+**Input:** `data/index/INDEX_general_PL.2020R1.lst`<br>
+**Output:** `output/pdbbind_v2020_metadata.csv`: 19,037 records, zero parsing failures; affinity types Kd/Ki/IC50. Compute pK = -log10(affinity_value) here.
 
 ---
 
-## 阶段三：去冗余与数据精化
+## Stage 2: Aggregate and compute labels
 
-> 本任务评估过序列/配体去冗余路线（95% 序列同一性、配体 95%、SMILES 95% 三版），
-> 最终**未采用**，样本量保持清洗后的 11,663；相应脚本已归档（见 §8），
-> 中间产物 `output/pdbbind_v2020_metadata_dedup95*.csv` 仅作留痕。
-> 数据精化指序列-结构对齐与整蛋白结构落盘，如下三步。
+### 2.1 Clean labels: retain Kd/Ki
 
-### 3.1 按链蛋白序列提取
+**Script:** `scripts/03_clean_metadata.py`<br>
+**Input:** `output/pdbbind_v2020_metadata.csv`<br>
+**Output:** `output/pdbbind_v2020_metadata_cleaned.csv` and `_stats.json`
 
-**脚本**：`scripts/05_extract_protein_sequences.py`
-**输入**：`output/pdbbind_v2020_metadata_ligand.csv` + `data/P-L/**/{pdb_id}_protein.pdb`
-**输出**：`output/pdbbind_v2020_metadata_seq.csv`（+ `_stats.json`、`sequence_extraction_failures.csv`）
+Exclude records with:
 
-- 从原始蛋白 PDB 中**按链**提取标准氨基酸与常见修饰氨基酸序列；
-- 多链蛋白的各链序列用 `|` 分隔（单链不加分隔符），同步产出 `protein_length`（各链求和，不含 `|`）、`protein_chains`（`;` 分隔）、`num_protein_chains`；
-- 按 (chain, res_seq, res_name) 去重且只保留蛋白残基，因此从原始文件提取与从 07 过滤后的 `pdbs/` 提取结果一致（历史注记：该按链口径原由已归档的 `17_reextract_sequences_from_pdbs.py` 事后重提取，现已并入本步一次做对）；
-- 提取成功 **11,663** / 失败 0；多链样本 **6,393**，单链 5,270；平均长度 532.8 aa，范围 24–5,280 aa。
+1. `affinity_type == IC50`.
+2. Non-exact `affinity_operator` values such as `<`, `<=`, or `~`.
+3. `[Incomplete ligand]`.
+4. `[Covalent complex]`.
+5. `[Different protein in assay]`.
+6. `[Different ligand in assay]`.
 
-### 3.2 样本级数据集落盘
+> `[Uncommon element]` indicates uncommon ligand elements, such as boron or metals. These records are retained: 96 samples. Further handling may be needed for element-sensitive models.
 
-**脚本**：`scripts/06_build_dataset_csv.py`
-**输入**：`output/pdbbind_v2020_metadata_seq.csv`
-**输出**：`output/pdbbind_v2020_dataset.csv`、`output/protein_chain_extraction_stats.json`
-
-- 保留序列提取成功的 11,663 条样本，补充 `protein_pdb_file`（`pdbs/{pdb_id}.pdb`）列；
-- 替代已归档 `08_extract_protein_chains.py` 的链级结构路线（不再逐链写 PDB）；`chain_extraction_success` / `chain_extraction_error` 两列为兼容历史下游保留，取值与序列提取成功标记一致。
-
-`pdbbind_v2020_dataset.csv` 核心字段：
-
-| 字段 | 说明 |
+| Item | Value |
 |------|------|
-| `pdb_id` | PDB 四位代码（即后续 `unique_id`） |
-| `resolution` / `release_year` | 分辨率（Å）/ 释放年份（时间划分依据） |
-| `affinity_type` / `affinity_value` / `pK` | Kd 或 Ki / 亲和力数值（M）/ 回归目标 |
-| `ligand_smiles` / `ligand_ecfp4` / `ligand_num_heavy_atoms` | 配体特征 |
-| `protein_sequence` / `protein_length` | 蛋白序列（多链 `\|` 分隔）/ 氨基酸总数 |
-| `protein_chains` / `num_protein_chains` | 链 ID 列表 / 链数 |
-| `protein_pdb_file` | 整蛋白 PDB 路径：`pdbs/{pdb_id}.pdb` |
-| `protein_file` / `ligand_sdf_file` / `pocket_file` | 原始文件相对路径 |
+| Before cleaning | 19,037 |
+| After cleaning | **11,664** (Kd 6,839 / Ki 4,825) |
+| Retention | 61.3% |
 
-### 3.3 整蛋白结构落盘
+### 2.2 Parse ligands: SMILES + ECFP4
 
-**脚本**：`scripts/07_copy_whole_protein_pdbs.py`
-**输入**：`output/pdbbind_v2020_dataset.csv` + `data/P-L/**/{pdb_id}_protein.pdb`
-**输出**：`pdbs/{pdb_id}.pdb`（11,663 个）、`output/whole_protein_pdb_stats.json`
+**Script:** `scripts/04_parse_ligands.py`<br>
+**Input:** `output/pdbbind_v2020_metadata_cleaned.csv`<br>
+**Output:** `output/pdbbind_v2020_metadata_ligand.csv`, `_stats.json`, and `ligand_parse_failures.csv`
 
-- 文件名**仅使用 PDB ID**；过滤非蛋白残基的 `HETATM`（水、配体、辅因子等），仅保留标准与常见修饰氨基酸；
-- 遇到第一个 `ENDMDL` 停止，避免 NMR 多模型重复。
+- Prefer `{pdb_id}_ligand.sdf`; fall back to `{pdb_id}_ligand.mol2`.
+- RDKit generates `ligand_smiles` (isomeric canonical SMILES), `ligand_ecfp4` (ECFP4/Morgan fingerprint, radius=2, nBits=2048, stored as ON-bit indices), and `ligand_num_heavy_atoms`.
+
+| Item | Value |
+|------|------|
+| Input | 11,664 |
+| Successfully parsed | **11,663** (`2pll` failed and was removed) |
+| Parsing failures | 1 |
 
 ---
 
-## 阶段四：数据划分与 OOD 标注
+## Stage 3: Redundancy reduction and refinement
 
-### 4.1 配体聚类 + 簇内时间切分 + 比例平衡
+> Three sequence/ligand deduplication approaches were evaluated (95% sequence identity, 95% ligand similarity, and 95% SMILES similarity) but **not adopted**. All 11,663 cleaned samples remain. Scripts are archived (§8); `output/pdbbind_v2020_metadata_dedup95*.csv` files are historical artifacts only.
+> Refinement comprises sequence–structure alignment and whole-protein structure export in the following three steps.
 
-**脚本**：`scripts/08_cluster_time_split.py`
-**输入**：`output/pdbbind_v2020_dataset.csv`
-**输出**：`splits/{train,val,test}.csv`（中间产物，09 消费后删除）、`output/cluster_split_stats.json`
+### 3.1 Extract protein sequences by chain
 
-1. **团划分聚类**：基于 ECFP4 指纹贪心团划分，保证同一簇内任意两样本 Tanimoto ≥ 0.6；孤立样本成单点簇（5,394 簇，单点 3,205，最大簇 271，平均 2.16）；
-2. **簇内时间切分**：每簇按 `release_year` 升序（同年按 `pdb_id`）按 7:1:2 切 train/val/test；
-3. **相似度兜底**：val/test 中与 train 最大 Tanimoto < 0.6 的样本迭代移入 train（共移动 **2,866** 个）；
-4. **比例平衡**（已并入原 `12_balance_val_from_test.py` / `13_adjust_val_to_train_9to1.py`）：兜底后 test 偏高、val 偏低，先将 test 按时间最早的 1/3（1,183 个）移入 val，再将 val 按时间最早的 442 个移入 train，使 train:val ≈ 9:1（实际 8.996）。
+**Script:** `scripts/05_extract_protein_sequences.py`<br>
+**Input:** `output/pdbbind_v2020_metadata_ligand.csv` and `data/P-L/**/{pdb_id}_protein.pdb`<br>
+**Output:** `output/pdbbind_v2020_metadata_seq.csv`, `_stats.json`, and `sequence_extraction_failures.csv`
 
-最终划分：train 8,366（71.7%）/ val 930（8.0%）/ test 2,367（20.3%）。
+- Extract standard and common modified amino acids **by chain** from source protein PDBs.
+- Join chains with `|` (no separator for single chains). Also generate `protein_length` (sum of chain lengths, excluding `|`), `protein_chains` (`;`-separated), and `num_protein_chains`.
+- Deduplicate by (chain, res_seq, res_name), retaining protein residues only. Extraction from source files therefore agrees with extraction from `pdbs/` after step 07. Historically, archived `17_reextract_sequences_from_pdbs.py` corrected chain handling afterward; that logic is now incorporated here.
+- Successful: **11,663**; failures: 0. Multichain: **6,393**; single-chain: 5,270. Mean length: 532.8 aa; range: 24–5,280 aa.
 
-### 4.2 统一 schema 格式化与序列同源性 OOD
+### 3.2 Write sample-level dataset
 
-**脚本**：`scripts/09_format_splits_to_skill.py`
-**输入**：`output/pdbbind_v2020_dataset.csv` + `splits/{train,val,test}.csv`
-**输出**：`splits/ligand_binding_affinity_{train,val,test}.csv`（删除中间产物）、`output/{test,train_val}_for_mmseqs.fasta`、`output/mmseqs_test_vs_trainval.tsv`
+**Script:** `scripts/06_build_dataset_csv.py`<br>
+**Input:** `output/pdbbind_v2020_metadata_seq.csv`<br>
+**Output:** `output/pdbbind_v2020_dataset.csv` and `output/protein_chain_extraction_stats.json`
 
-- 输出统一 schema：`unique_id, aa_seq, struct_file, ligand_smiles, ligand_ecfp4, label`；`label`（pK）强制字符串、统一 6 位小数；`struct_file` 为文件名（`{pdb_id}.pdb`）；
-- test 追加 `Default`（本任务全 True）、`OOD_ExtremeShort` / `OOD_ExtremeLong`（蛋白总长 < 60 / > 1,000，仅标记不移除）、`seq_Redundancy_90..30`、`OOD_Orphan`；
-- 序列同源性用 mmseqs2 计算 test 相对 train+val 的最大 identity（mmseqs2 只接受标准氨基酸，FASTA 写出时去除 `|`）；支持 `--mmseqs-cache` 重放已有 convertalis 结果。
-- **superseded**：本脚本的 mmseqs2 段为历史首遍实现，统一口径与重放工具以 `.skills/homology-ood-annotation` 的 `scripts/seq_homology_ood.py` 为准（easy-search / `--m8-cache`）。
+- Keep the 11,663 successfully extracted samples and add `protein_pdb_file` (`pdbs/{pdb_id}.pdb`).
+- Replace the chain-level route in archived `08_extract_protein_chains.py`; individual-chain PDBs are no longer written. Retain `chain_extraction_success` / `chain_extraction_error` for downstream compatibility, matching sequence-extraction success.
 
-字段说明：
+Core fields in `pdbbind_v2020_dataset.csv`:
 
-| 字段 | 说明 |
+| Field | Description |
 |------|------|
-| `unique_id` | 样本唯一标识，即 `pdb_id` |
-| `aa_seq` | 蛋白质氨基酸序列；多链样本用 `\|` 分隔各链 |
-| `struct_file` | 蛋白结构文件名（仅文件名）：`{pdb_id}.pdb`，位于 `pdbs/` |
-| `ligand_smiles` / `ligand_ecfp4` | 配体 canonical SMILES / ECFP4 ON-bits 列表 |
-| `label` | 亲和力标签 `pK`，**强制保存为字符串，统一保留 6 位小数** |
+| `pdb_id` | Four-character PDB code; later used as `unique_id` |
+| `resolution` / `release_year` | Resolution (Å) / release year for temporal splitting |
+| `affinity_type` / `affinity_value` / `pK` | Kd or Ki / affinity in M / regression target |
+| `ligand_smiles` / `ligand_ecfp4` / `ligand_num_heavy_atoms` | Ligand features |
+| `protein_sequence` / `protein_length` | Protein sequence (chains separated by `\|`) / total amino acids |
+| `protein_chains` / `num_protein_chains` | Chain IDs / number of chains |
+| `protein_pdb_file` | Whole-protein PDB path: `pdbs/{pdb_id}.pdb` |
+| `protein_file` / `ligand_sdf_file` / `pocket_file` | Relative source-file paths |
 
-### 4.3 结构相似性与 IDR OOD
+### 3.3 Write whole-protein structures
 
-**脚本**：`scripts/10_compute_structure_idr_ood.py`
-**输入**：`splits/ligand_binding_affinity_{train,val,test}.csv`、`pdbs/`
-**输出**：就地更新 test.csv（追加 `TM-score_0.9..0.3`、`idr_ratio`、`OOD_IDR`）、更新 `output/cluster_split_stats.json`
+**Script:** `scripts/07_copy_whole_protein_pdbs.py`<br>
+**Input:** `output/pdbbind_v2020_dataset.csv` and `data/P-L/**/{pdb_id}_protein.pdb`<br>
+**Output:** 11,663 `pdbs/{pdb_id}.pdb` files and `output/whole_protein_pdb_stats.json`
 
-- **Foldseek-Multimer 复合物比对（2026-08-29 起）**：`easy-multimersearch`（query=test 2,367 复合物结构，target=train+val 9,296 结构），取每对复合物 `complexqtmscore`/`complexttmscore` 对称均值的最大值；foldseek createdb 会将多链 PDB 拆链（`<file>_<chain>`），聚合时归一回复合物 stem（单链文件为裸名）。复合物级 TM 最贴合"复合物-配体亲和力"语义。旧口径为单链 `search -a` + `qtmscore/ttmscore` 对称均值（注意与其他任务的 `alntmscore` 均不一致），三方对比（旧对称均值 / 单链 alntm max / 复合物 multimer）见 `analysis/output/foldseek_easysearch_audit/lba/multimer/three_way_compare.txt`，旧 test 备份于 `output/backup_before_multimer_tm_unify/`，per-stem 缓存 `output/foldseek_multimer_max_tm_per_stem.csv`；
-- metapredict 预测内在无序区域占比，`idr_ratio > 0.1` → `OOD_IDR`；统一工具见 `.skills/ood-annotation-toolkit`（`scripts/idr_ood.py`）。
+- Filenames use **PDB ID only**. Filter non-protein `HETATM` residues (water, ligands, cofactors, etc.); keep standard and common modified amino acids.
+- Stop at the first `ENDMDL` to avoid duplicates from NMR models.
 
-### 4.4 CATH Fold / Superfamily Holdout（CATH+TED 并集终值）
+---
 
-**脚本**：`scripts/11_ted_augment_cath_ood.py`
-**输入**：`splits/ligand_binding_affinity_{train,val,test}.csv`、项目级 `data/sifts/`、`data/CATHv44/`
-**输出**：`output/ligand_ted_aug_chain_list.csv`、`ligand_chain_cath_ted_labels.csv`、`ligand_chain_domains.csv`、`ligand_pdb_cath_ted_labels.csv`、`ligand_pdb_cath_ted_holdout.csv`；就地更新 test.csv 两列
+## Stage 4: Split data and annotate OOD
 
-终值口径为 **CATH+TED 并集**（CATH v4.4 实验标注优先，TED putative 补缺），统一流程见 `.skills/cath-ted-domain-annotation`；holdout 判定（train-only 参考、any 语义、无注释 → False）以该 skill 的 `scripts/cath_ted_holdout.py` 为唯一实现。流程：
+### 4.1 Ligand clustering, within-cluster temporal splitting, and balancing
 
-1. **链清单**：11,663 个 PDB ×（SIFTS 两文件 ∪ `cath-domain-list.txt` 中出现的链）——仅 SIFTS 播种会漏 **944 条 CATH 已标注链**（342 个 PDB，含 87 个 test PDB 的 278 链）；
-2. 调用 skill 的 `cath_ted_annotate.py`（`--offline`，TED 经 50% 域重叠过滤，H 级提供 C.A.T.H、T 级仅 C.A.T；API 缓存于项目级 `data/ted/ted_api_cache.json`）；
-3. 链级标签按 PDB 聚合取并集（PDB 级口径）；**对称增强**——train 自身同样用 CATH+TED 并集作参考集，避免 test 的 TED-only 标签假性"未见"；
-4. holdout 判定调用 skill 的 `cath_ted_holdout.py`，仅就地更新 test 两列（其余列不动）。
+**Script:** `scripts/08_cluster_time_split.py`<br>
+**Input:** `output/pdbbind_v2020_dataset.csv`<br>
+**Output:** intermediate `splits/{train,val,test}.csv` (consumed and removed by 09) and `output/cluster_split_stats.json`
 
-**数据规模**：27,352 链（11,663 PDB）；标注来源 both 18,990 / cath-only 3,219 / ted-only 2,115 / none 3,028；TED 缓存命中 3,811 个 accession（0 次新查询）。
+1. **Clique partition:** greedily cluster ECFP4 fingerprints, requiring pairwise Tanimoto ≥0.6 within each cluster. Isolated samples form singleton clusters: 5,394 clusters, 3,205 singletons, maximum size 271, mean size 2.16.
+2. **Within-cluster temporal split:** sort each cluster by `release_year`, breaking ties by `pdb_id`, then split train/val/test 7:1:2.
+3. **Similarity fallback:** iteratively move val/test samples with maximum training Tanimoto <0.6 into train: **2,866** samples moved.
+4. **Ratio balancing:** incorporates former `12_balance_val_from_test.py` / `13_adjust_val_to_train_9to1.py`. After fallback, move the earliest third of test (1,183 samples) into val, then the earliest 442 val samples into train, giving train:val ≈9:1 (actual 8.996).
 
-**结果（test，n=2,367）**：`OOD_FoldHoldout` **38** 条、`OOD_SuperfamilyHoldout` **73** 条、无注释样本（静默 False）149 条。更新前备份：`output/backup_before_ted_aug/`。
+Final split: train 8,366 (71.7%), val 930 (8.0%), test 2,367 (20.3%).
 
-> superseded：仅 CATH 的本地基线实现 `16_cath_ec_ood.py` 已归档（该口径下 27.5% 的测试 PDB 无任何标注，Fold/Superfamily 仅 24/45 条）；其 EC 部分同时被 §4.5 的 skill 统一口径取代。
+### 4.2 Unified schema and sequence-homology OOD
 
-### 4.5 EC 功能 OOD：`OOD_NewEC_*` / `OOD_LongTail_EC_*`（skill 落盘）
+**Script:** `scripts/09_format_splits_to_skill.py`<br>
+**Input:** `output/pdbbind_v2020_dataset.csv` and `splits/{train,val,test}.csv`<br>
+**Output:** `splits/ligand_binding_affinity_{train,val,test}.csv` (intermediate files removed), `output/{test,train_val}_for_mmseqs.fasta`, and `output/mmseqs_test_vs_trainval.tsv`
 
-> 统一口径、层级解析与驱动脚本见 `.skills/ec-function-ood-annotation`（`scripts/add_unified_newec.py`、`scripts/add_unified_longtail_ec.py`）。本任务 EC 来源：`data/sifts/sifts_chain_ec.tsv.gz`，按 PDB 全链并集。
+- Unified schema: `unique_id, aa_seq, struct_file, ligand_smiles, ligand_ecfp4, label`. Store `label` (pK) as a string with six decimal places and `struct_file` as a filename (`{pdb_id}.pdb`).
+- Add test columns: `Default` (all True), `OOD_ExtremeShort` / `OOD_ExtremeLong` (total protein length <60 / >1,000; flag without removing), `seq_Redundancy_90..30`, and `OOD_Orphan`.
+- Compute maximum test-to-train+val sequence identity with mmseqs2. Remove `|` in FASTA because mmseqs2 accepts only standard amino acids. `--mmseqs-cache` replays existing convertalis results.
+- **Superseded:** this script contains the historical first-pass mmseqs2 implementation. The canonical implementation/replay tool is `.skills/homology-ood-annotation/scripts/seq_homology_ood.py` (easy-search / `--m8-cache`).
 
-- `OOD_NewEC_L4` / `OOD_NewEC_L3`：参考集 = **train+val** 出现的 EC 集合；**all-not-in** 语义——样本有 EC 注释且其所有 EC（对应层级）都不在参考集 → True；无 EC 注释 → False；
-- `OOD_LongTail_EC_{L3,L4}_le{5,10}`：参考集 = **train-only** 逐样本频次（**含 0**）；all-not-in——样本所有 EC（对应层级）train 频次都 < 5 / < 10 → True；无注释 → False；
-- 旧列 `OOD_NewFunction`（any 口径，54 条）与 `OOD_LongTailFunction`（181 条）已由统一口径列**删除替换**；备份：`output/backup_before_newec_unify/`、`output/backup_before_longtail_allnotin/`。
+| Field | Description |
+|------|------|
+| `unique_id` | Unique sample ID, equal to `pdb_id` |
+| `aa_seq` | Protein amino-acid sequence; multichain sequences separated by `\|` |
+| `struct_file` | Structure filename only: `{pdb_id}.pdb`, located in `pdbs/` |
+| `ligand_smiles` / `ligand_ecfp4` | Canonical ligand SMILES / ECFP4 ON-bit indices |
+| `label` | Affinity pK, **stored as a string with six decimal places** |
 
-### 4.6 值域 AffBin LongTail
+### 4.3 Structural similarity and IDR OOD
 
-**脚本**：`scripts/12_add_value_bin_longtail_ood.py`
-**输入**：`splits/ligand_binding_affinity_{train,test}.csv`
-**输出**：就地更新 test.csv（追加 `OOD_LongTail_AffBin_le50` / `le100`）、`output/ligand_longtail_affbin_summary.json`
+**Script:** `scripts/10_compute_structure_idr_ood.py`<br>
+**Input:** `splits/ligand_binding_affinity_{train,val,test}.csv` and `pdbs/`<br>
+**Output:** update test.csv in place with `TM-score_0.9..0.3`, `idr_ratio`, and `OOD_IDR`; update `output/cluster_split_stats.json`
 
-- `label`（pK）按 **0.5 宽 bin**（范围 [-0.5, 16.5)）分箱，统计 **train** 各 bin 样本数；
-- test 样本所属 bin 的 train 计数 ≤ 50 / ≤ 100 → True（本任务 test 全部 Default=True）；
-- train pK 分布（n=8,366）近似正态（mean=6.26，std=1.97），LongTail 两端对称；test 阳性样本 label 横跨 (0.66, 12.30)，确为分布两端的极端亲和力样本；
-- 本任务 label 无 clip 删失（对照：kcat 任务存在上游 CatPred-DB [-6, 6] 截断）；
-- 通用工具见 `.skills/ood-annotation-toolkit`（`scripts/value_bin_longtail_ood.py`）。
+- **Foldseek-Multimer complex alignment (since 2026-08-29):** `easy-multimersearch`, using 2,367 test complexes as queries and 9,296 train+val structures as targets. Take the maximum symmetric mean of each complex pair's `complexqtmscore`/`complexttmscore`. Foldseek createdb splits multichain PDBs (`<file>_<chain>`); normalize hits back to the complex stem (bare name for single-chain files). Complex-level TM matches the complex–ligand affinity task. Previously: single-chain `search -a` with symmetric `qtmscore/ttmscore` means (different from other tasks' `alntmscore`). See `analysis/output/foldseek_easysearch_audit/lba/multimer/three_way_compare.txt` for old symmetric mean / single-chain alntm max / complex multimer comparisons. Old test backup: `output/backup_before_multimer_tm_unify/`; per-stem cache: `output/foldseek_multimer_max_tm_per_stem.csv`.
+- metapredict estimates intrinsic disorder; `idr_ratio >0.1` sets `OOD_IDR`. Unified tool: `.skills/ood-annotation-toolkit/scripts/idr_ood.py`.
 
-### 4.7 InD 收尾与体检（skill 落盘）
+### 4.4 CATH fold/superfamily holdouts: final CATH+TED union
 
-> 统一收尾工具：`.skills/ood-annotation-toolkit` 的 `scripts/finalize_ood_columns.py`；体检用同 skill 的 `scripts/check_splits.py`。
+**Script:** `scripts/11_ted_augment_cath_ood.py`<br>
+**Input:** `splits/ligand_binding_affinity_{train,val,test}.csv`, project-level `data/sifts/` and `data/CATHv44/`<br>
+**Output:** `output/ligand_ted_aug_chain_list.csv`, `ligand_chain_cath_ted_labels.csv`, `ligand_chain_domains.csv`, `ligand_pdb_cath_ted_labels.csv`, and `ligand_pdb_cath_ted_holdout.csv`; update two test columns in place
 
-- `InD`：所有 `OOD_*` + `seq_Redundancy_*` + `TM-score_*` 标记均为 False（NaN 视为 False）时为 True，由 `finalize_ood_columns.py --mode ind` 在所有 OOD 列齐备后统一重算；当前 **1,091 / 2,367（46.1%）**；备份见 `output/backup_before_ind/`；
-- NaN 惯例（`--mode nan`）：本任务 test `Default` 全为 True（LBA/PPI 惯例），无 Default=False 行，故无需 NaN 化；
-- `check_splits.py` 体检全部通过（泄露、子集关系等，见 §5）。
+Use the **CATH+TED union**: prioritize CATH v4.4 experimental annotations; fill gaps with putative TED annotations. Unified workflow: `.skills/cath-ted-domain-annotation`. Its `scripts/cath_ted_holdout.py` is the sole holdout implementation (training-only reference, any semantics, unannotated →False).
 
-### 4.8 Test OOD 统计（终值，当前 splits 实测）
+1. **Chain list:** 11,663 PDBs × chains present in either SIFTS file or `cath-domain-list.txt`. SIFTS-only seeding misses **944 CATH-annotated chains** across 342 PDBs, including 278 chains in 87 test PDBs.
+2. Run `cath_ted_annotate.py` with `--offline`. TED requires 50% domain overlap; H level provides C.A.T.H, T level only C.A.T. API cache: project-level `data/ted/ted_api_cache.json`.
+3. Union chain labels by PDB. **Symmetric augmentation:** use the CATH+TED union for training references as well, avoiding falsely unseen TED-only test labels.
+4. Run `cath_ted_holdout.py`, updating only the two test holdout columns.
 
-| OOD 维度 | 标记列 | True 数量 |
+**Scale:** 27,352 chains, 11,663 PDBs. Sources: both 18,990 / cath-only 3,219 / ted-only 2,115 / none 3,028. TED cache hits: 3,811 accessions; zero new queries.
+
+**Test results (n=2,367):** `OOD_FoldHoldout` **38**, `OOD_SuperfamilyHoldout` **73**, unannotated samples (silently False) 149. Backup: `output/backup_before_ted_aug/`.
+
+> Superseded: archived CATH-only `16_cath_ec_ood.py` left 27.5% of test PDBs unannotated and yielded only 24/45 fold/superfamily holdouts. Its EC section is also superseded by §4.5.
+
+### 4.5 EC function OOD: `OOD_NewEC_*` / `OOD_LongTail_EC_*`
+
+> Canonical definitions, hierarchy parsing, and drivers: `.skills/ec-function-ood-annotation` (`scripts/add_unified_newec.py`, `scripts/add_unified_longtail_ec.py`). EC source: `data/sifts/sifts_chain_ec.tsv.gz`, unioned across all chains per PDB.
+
+- `OOD_NewEC_L4` / `OOD_NewEC_L3`: reference = EC labels in **train+val**; **all-not-in** semantics. True if annotated and all ECs at the given level are absent from the reference; unannotated →False.
+- `OOD_LongTail_EC_{L3,L4}_le{5,10}`: **training-only** per-sample frequencies, **including zero**. All-not-in: True if every EC at that level has training frequency <5 / <10; unannotated →False.
+- Legacy `OOD_NewFunction` (any semantics, 54 samples) and `OOD_LongTailFunction` (181 samples) were **removed and replaced**. Backups: `output/backup_before_newec_unify/`, `output/backup_before_longtail_allnotin/`.
+
+### 4.6 Affinity-bin long-tail OOD
+
+**Script:** `scripts/12_add_value_bin_longtail_ood.py`<br>
+**Input:** `splits/ligand_binding_affinity_{train,test}.csv`<br>
+**Output:** update test.csv with `OOD_LongTail_AffBin_le50` / `le100`; write `output/ligand_longtail_affbin_summary.json`
+
+- Bin pK labels with **width 0.5**, range [-0.5, 16.5); count **training** samples per bin.
+- True if a test sample's bin has training count ≤50 / ≤100. All test samples have Default=True.
+- Training pK (n=8,366) is approximately normal (mean=6.26, std=1.97), with symmetric long tails. Positive test labels span (0.66, 12.30), representing extreme affinities at both ends.
+- Labels are not clipped (unlike kcat's upstream CatPred-DB clipping to [-6, 6]).
+- Generic tool: `.skills/ood-annotation-toolkit/scripts/value_bin_longtail_ood.py`.
+
+### 4.7 Finalize InD and validate
+
+> Finalizer: `.skills/ood-annotation-toolkit/scripts/finalize_ood_columns.py`; validator: `scripts/check_splits.py` in the same skill.
+
+- `InD`: True when all `OOD_*`, `seq_Redundancy_*`, and `TM-score_*` flags are False (NaN treated as False). Recompute with `finalize_ood_columns.py --mode ind` after all OOD columns are ready. Recorded count: **1,091 / 2,367 (46.1%)**; backup: `output/backup_before_ind/`.
+- NaN convention (`--mode nan`): all test `Default` values are True (LBA/PPI convention), so there are no Default=False rows requiring NaN conversion.
+- `check_splits.py` passes leakage and subset-relation checks (§5).
+
+### 4.8 Test OOD statistics: final recorded splits
+
+| OOD dimension | Flag | True count |
 |----------|--------|----------|
-| ID 测试集 | `Default` | 2,367 |
-| 极端短链 / 极端长链 | `OOD_ExtremeShort` / `OOD_ExtremeLong` | 15 / 303 |
-| 序列冗余 < 90%~30% | `seq_Redundancy_90` ~ `seq_Redundancy_30` | 575 / 498 / 454 / 409 / 368 / 294 / 241 |
-| 无同源 hit | `OOD_Orphan` | 181 |
-| 结构新颖（复合物 TM < 0.9~0.3） | `TM-score_0.9` ~ `TM-score_0.3` | 767 / 662 / 447 / 306 / 201 / 135 / 79 |
-| 高内在无序区（idr > 0.1） | `OOD_IDR` | 93 |
-| CATH+TED 超家族 / 折叠留一法 | `OOD_SuperfamilyHoldout` / `OOD_FoldHoldout` | 73 / 38 |
-| EC 新功能 L4 / L3（统一口径） | `OOD_NewEC_L4` / `OOD_NewEC_L3` | 46 / 8 |
-| EC 长尾 L3（le5 / le10） | `OOD_LongTail_EC_L3_le5` / `le10` | 24 / 37 |
-| EC 长尾 L4（le5 / le10） | `OOD_LongTail_EC_L4_le5` / `le10` | 189 / 344 |
-| 亲和力 bin 长尾（le50 / le100） | `OOD_LongTail_AffBin_le50` / `le100` | 19 / 65 |
-| 纯 ID 样本 | `InD` | 1,247（52.7%） |
+| Default test set | `Default` | 2,367 |
+| Extreme short / long | `OOD_ExtremeShort` / `OOD_ExtremeLong` | 15 / 303 |
+| Sequence identity <90%–30% | `seq_Redundancy_90`–`seq_Redundancy_30` | 575 / 498 / 454 / 409 / 368 / 294 / 241 |
+| No homologous hit | `OOD_Orphan` | 181 |
+| Structural novelty (complex TM <0.9–0.3) | `TM-score_0.9`–`TM-score_0.3` | 767 / 662 / 447 / 306 / 201 / 135 / 79 |
+| High disorder (idr >0.1) | `OOD_IDR` | 93 |
+| CATH+TED superfamily / fold holdout | `OOD_SuperfamilyHoldout` / `OOD_FoldHoldout` | 73 / 38 |
+| New EC L4 / L3 | `OOD_NewEC_L4` / `OOD_NewEC_L3` | 46 / 8 |
+| Long-tail EC L3 (le5 / le10) | `OOD_LongTail_EC_L3_le5` / `le10` | 24 / 37 |
+| Long-tail EC L4 (le5 / le10) | `OOD_LongTail_EC_L4_le5` / `le10` | 189 / 344 |
+| Long-tail affinity bins (le50 / le100) | `OOD_LongTail_AffBin_le50` / `le100` | 19 / 65 |
+| Pure InD samples | `InD` | 1,247 (52.7%) |
 
-当前 test 完整 38 列表头：
+Current test header (38 columns):
 
 ```
 unique_id, aa_seq, struct_file, ligand_smiles, ligand_ecfp4, label,
@@ -281,104 +277,104 @@ OOD_LongTail_EC_L4_le5, OOD_LongTail_EC_L4_le10,
 OOD_NewEC_L3, InD
 ```
 
-### 4.9 配体化学相似度（Tanimoto）
+### 4.9 Ligand chemical similarity: Tanimoto
 
-val/test 每个样本与训练集所有样本的最大 Tanimoto：
+Maximum Tanimoto similarity of each val/test sample to all training samples:
 
-| 集合 | 均值 | 中位数 | 最小值 | 最大值 |
+| Split | Mean | Median | Min | Max |
 |------|------|--------|--------|--------|
 | Val | 0.858 | 0.873 | 0.600 | 1.000 |
 | Test | 0.846 | 0.835 | 0.600 | 1.000 |
 
-| 相似度区间 | Val | Test |
+| Similarity interval | Val | Test |
 |------------|-----|------|
 | 0.6–0.7 | 179 | 495 |
 | 0.7–0.8 | 198 | 551 |
 | 0.8–0.9 | 103 | 290 |
-| ≥ 0.9 | 450 | 1,031 |
+| ≥0.9 | 450 | 1,031 |
 
-> 所有 val/test 样本与训练集的最大 Tanimoto 均 ≥ 0.6（划分设计的下限）。
-
----
-
-## 5. 数据质量检查
-
-1. **泄露检查**：Train ∩ Val、Train ∩ Test、Val ∩ Test 的 `unique_id` 交集均为空（`ood-annotation-toolkit` 的 `check_splits.py` 体检全部通过，`OOD_Orphan ⊆ seq_Redundancy_30` 子集关系成立）；
-2. **划分设计防泄露**：同一配体相似度簇（pairwise Tanimoto ≥ 0.6）不跨 train/val/test；val/test 与 train 最大 Tanimoto ≥ 0.6 为刻意保留的化学相似性下限；
-3. **分布一致性**：长度、Kd/Ki 比例在各子集间一致；test pK 范围 (0.66, 12.30) 落在 train 分布内；
-4. **序列-结构一致性**：`aa_seq` 与 `pdbs/` 结构逐样本对齐（按链提取口径，见 §3.1；历史上重提取验证不一致 0 条）；
-5. **异常值处理**：`2pll` 配体解析失败被移除（§2.2）；IC50 与不等号/异常注释记录已在清洗阶段排除（§2.1）。
+> Every val/test sample has maximum training Tanimoto ≥0.6, the intended chemical-support floor.
 
 ---
 
-## 6. 输出文件汇总
+## 5. Data quality checks
+
+1. **Leakage:** pairwise Train/Val/Test `unique_id` intersections are empty. `check_splits.py` passes all checks, including `OOD_Orphan ⊆ seq_Redundancy_30`.
+2. **Split design:** samples are split chronologically **within** each ligand-similarity cluster (pairwise Tanimoto ≥0.6). Clusters may span train/val/test and are not held out as groups. The val/test maximum-training Tanimoto floor of 0.6 deliberately preserves chemical support. This is not a single global temporal cutoff.
+3. **Distribution consistency:** length and Kd/Ki proportions are consistent across subsets; test pK range (0.66, 12.30) lies within training support.
+4. **Sequence–structure consistency:** `aa_seq` aligns sample by sample with `pdbs/`, using chain-wise extraction (§3.1). Historical re-extraction found zero mismatches.
+5. **Outliers:** remove `2pll` after ligand parsing failure (§2.2). IC50, inequalities, and problematic annotations are excluded during cleaning (§2.1).
+
+---
+
+## 6. Output files
 
 ```
 ligand_binding_affinity/
-├── DATA_PROCESS.md              # 本文档
-├── data/                        # 原始数据
+├── DATA_PROCESS.md              # This document
+├── data/                        # Raw data
 │   ├── index/
 │   └── P-L/
-├── pdbs/                        # 整蛋白 PDB 文件（11,663 个，{pdb_id}.pdb）
-├── scripts/                     # 处理脚本（编号见文首总览）
+├── pdbs/                        # 11,663 whole-protein PDBs: {pdb_id}.pdb
+├── scripts/                     # Numbered processing scripts listed above
 ├── output/
 │   ├── pdbbind_v2020_metadata.csv
 │   ├── pdbbind_v2020_metadata_cleaned.csv
 │   ├── pdbbind_v2020_metadata_ligand.csv
 │   ├── pdbbind_v2020_metadata_seq.csv
-│   ├── pdbbind_v2020_dataset.csv          # 样本级数据集（阶段四输入）
-│   ├── pdbbind_v2020_metadata_dedup95*.csv  # 旧去冗余路线留痕（未采用）
+│   ├── pdbbind_v2020_dataset.csv          # Sample-level dataset; Stage 4 input
+│   ├── pdbbind_v2020_metadata_dedup95*.csv # Historical unused deduplication route
 │   ├── ligand_parse_failures.csv
 │   ├── whole_protein_pdb_stats.json
 │   ├── cluster_split_stats.json
 │   ├── {test,train_val}_for_mmseqs.fasta / mmseqs_test_vs_trainval.tsv
-│   ├── ligand_ted_aug_chain_list.csv      # PDB×链清单（含 splits 归属）
-│   ├── ligand_chain_cath_ted_labels.csv   # 链级 CATH+TED 标签
-│   ├── ligand_chain_domains.csv           # 域级明细（81,029 行）
+│   ├── ligand_ted_aug_chain_list.csv      # PDB × chain list with split membership
+│   ├── ligand_chain_cath_ted_labels.csv   # Chain-level CATH+TED labels
+│   ├── ligand_chain_domains.csv           # Domain details: 81,029 rows
 │   ├── ligand_pdb_cath_ted_labels.csv / ligand_pdb_cath_ted_holdout.csv
 │   ├── ligand_longtail_affbin_summary.json
-│   ├── scripts_archive/                   # 归档脚本（见 §8）
-│   └── backup_before_*/                   # 各次 splits 更新前备份
+│   ├── scripts_archive/                   # Archived scripts (§8)
+│   └── backup_before_*/                   # Backups before split updates
 └── splits/
     ├── ligand_binding_affinity_train.csv  # 8,366
     ├── ligand_binding_affinity_val.csv    # 930
-    └── ligand_binding_affinity_test.csv   # 2,367，含完整 OOD 标记列
+    └── ligand_binding_affinity_test.csv   # 2,367, including all OOD flags
 ```
 
 ---
 
-## 7. 诊断与质控工具
+## 7. Diagnostics and quality-control tools
 
-本任务无独立 `diag_*` 脚本；质控通过以下途径完成：
+No standalone `diag_*` scripts are used. Quality control relies on:
 
-- `.skills/ood-annotation-toolkit/scripts/check_splits.py`：splits 体检（泄露、列完整性、子集关系）；
-- `08_cluster_time_split.py` 输出的 `output/cluster_split_stats.json`：聚类与划分统计、max_train_tanimoto 分布；
-- 各步骤的 `*_stats.json` / 失败清单 CSV（见 §6 目录树）。
+- `.skills/ood-annotation-toolkit/scripts/check_splits.py`: leakage, column completeness, and subset relations.
+- `output/cluster_split_stats.json`, generated by `08_cluster_time_split.py`: clustering, split statistics, and max_train_tanimoto distributions.
+- Per-step `*_stats.json` and failure-list CSVs (§6).
 
 ---
 
-## 8. 归档脚本清单（`output/scripts_archive/`）
+## 8. Archived scripts: `output/scripts_archive/`
 
-| 脚本 | 归档原因 |
+| Script | Reason archived |
 |:---|:---|
-| `05_dedup_sequences_95.py` | 旧去冗余路线（95% 序列同一性），评估后未采用 |
-| `06_dedup_by_ligand_95.py` | 旧去冗余路线（配体 95%），评估后未采用 |
-| `07_dedup_by_smiles_95.py` | 旧去冗余路线（SMILES 95%），评估后未采用 |
-| `08_extract_protein_chains.py` | 链级结构路线已被整蛋白路线取代；`pdbbind_v2020_dataset.csv` 现由 `06_build_dataset_csv.py` 生成 |
-| `10_time_split_and_tanimoto.py` | 旧划分路线，已被 `08_cluster_time_split.py` 取代 |
-| `12_balance_val_from_test.py` | 比例平衡逻辑已融入 `08_cluster_time_split.py` |
-| `13_adjust_val_to_train_9to1.py` | 同上（train:val 9:1 调整已融入 08） |
-| `16_cath_ec_ood.py` | 仅 CATH 基线与 EC 旧口径，已被 `11_ted_augment_cath_ood.py` + ec-function-ood-annotation skill 双重取代 |
-| `17_reextract_sequences_from_pdbs.py` | 按链 `\|` 序列提取逻辑已融入 `05_extract_protein_sequences.py` |
+| `05_dedup_sequences_95.py` | Evaluated but unused 95% sequence-identity deduplication |
+| `06_dedup_by_ligand_95.py` | Evaluated but unused 95% ligand-similarity deduplication |
+| `07_dedup_by_smiles_95.py` | Evaluated but unused 95% SMILES-similarity deduplication |
+| `08_extract_protein_chains.py` | Chain-level structures replaced by whole proteins; `06_build_dataset_csv.py` now generates `pdbbind_v2020_dataset.csv` |
+| `10_time_split_and_tanimoto.py` | Replaced by `08_cluster_time_split.py` |
+| `12_balance_val_from_test.py` | Balancing incorporated into `08_cluster_time_split.py` |
+| `13_adjust_val_to_train_9to1.py` | Train:val 9:1 adjustment incorporated into 08 |
+| `16_cath_ec_ood.py` | CATH-only and legacy EC definitions replaced by `11_ted_augment_cath_ood.py` and the ec-function-ood-annotation skill |
+| `17_reextract_sequences_from_pdbs.py` | Chain-wise `\|` sequence extraction incorporated into `05_extract_protein_sequences.py` |
 
 ---
 
-## 9. 注意事项（历史演进、无脚本环节与已知偏差）
+## 9. Notes: history, non-script steps, and known deviations
 
-1. **LBA/PPI 惯例——Default 全 True**：本任务 train/val 保留极端长度样本（train 含 67 条 < 60 aa、1,008 条 > 1,000 aa 总长的样本），test 不做极端长度剔除，`Default=True` 覆盖全部 2,367 个测试样本；`OOD_ExtremeShort` / `OOD_ExtremeLong` 仅标记不移除，无 Default=False 行，故无 NaN 化需求。
-2. **多链复合物**：`aa_seq` 以 `|` 分隔各链序列（test 1,264 条、train 4,591 条多链样本），下游工具使用前应先去除分隔符；长度统计为各链求和。
-3. **超长单链集中在边界**：> 1,000 aa 的**单链**样本长度集中在 1,014–1,016 边界（train 25 条单链超长中 16 条落在 1,014–1,016，val 3 条为 1,015–1,016；test 仅 4 条，为 1,029–1,195）；其余超长样本均为多链复合物总长度超限；无单链 > 2,000 aa 样本。
-4. **≤3aa 短链片段为原始沉积特征（2026-08-28 核查）**：train 7 条 / val 2 条 / test 2 条样本含 ≤3aa 的链片段，已逐样本核对 `data/P-L/` PDBbind 原始文件与 RCSB 镜像，全部来自 PDB 沉积本身而非提取 artifact：肽类抑制剂链（1eb1 仅存 PRO 2）、UNK 占位/短肽 stub（2j9n GLN+UNK、3e4a/6byz/4hva/3t6y/3t64/3t70 poly-Ala/His）、交替构象去重塌缩（5jjm Ser-Asp ×12 构象）、HETATM 沉积的修饰残基（4aze SEP→S，注意其记录名为 `HETATM17267` 无空格溢出格式）。按链提取口径（ATOM+HETATM、修饰残基映射）忠实保留了这些链，无需修复。
-5. **浮点重序列化漂移（2026-08-28 验证发现）**：`output/pdbbind_v2020_dataset.csv` 经历史多次中间文件读写，`3o56` 的 `affinity_value` 存在 1 ulp 级漂移（当前 `7.939999999999993e-10`，由 05+06 重新生成为 `7.939999999999995e-10`，原始 `metadata.csv` 为 `7.939999999999999e-10`）；`pK` 字符串不受影响（逐位一致），对标签与划分无任何影响。属历史口径偏差，留痕不修复。
-6. **整理验证记录（2026-08-28）**：新 `05`+`06` 链从 `pdbbind_v2020_metadata_ligand.csv` 重生成 `pdbbind_v2020_dataset.csv`，与现有文件 11,663 行 × 36 列逐值 diff 一致（仅上述 3o56 单格 1 ulp 偏差）；合并后的 `08_cluster_time_split.py` 全量重跑（5,394 簇、移动 2,866 + 1,183 + 442），train/val/test 样本归属与当前 splits **完全一致**。
-7. **历史演进**（终值已融入正文，此处仅留痕）：FoldHoldout/SuperfamilyHoldout 由仅 CATH 基线（24/45）经 TED 增强重算为终值（38/73）；NewEC/LongTailEC 统一为 all-not-in 口径并删除旧列 `OOD_NewFunction`/`OOD_LongTailFunction`；AffBin LongTail 列后补；`InD` 由 toolkit 统一重算。各次更新的 splits 备份在 `output/backup_before_*/`。
+1. **LBA/PPI convention: Default always True.** Train/val retain extreme lengths: training has 67 samples <60 aa and 1,008 with total length >1,000 aa. Test does not exclude extreme lengths; all 2,367 test samples have `Default=True`. Extreme-length flags annotate without removing; no Default=False rows require NaN conversion.
+2. **Multichain complexes:** `aa_seq` separates chains with `|` (1,264 multichain test samples, 4,591 train). Remove separators for downstream tools as needed. Length is the sum across chains.
+3. **Long single chains near the boundary:** single-chain lengths >1,000 cluster around 1,014–1,016 aa. Of 25 long single-chain training samples, 16 fall in this interval; all three validation samples are 1,015–1,016. Test has only four, at 1,029–1,195. Other long samples exceed the threshold only in combined multichain length; no single chain exceeds 2,000 aa.
+4. **≤3-aa fragments are source-deposition features (audit 2026-08-28):** seven train, two val, and two test samples contain such fragments. Individual checks against PDBbind sources in `data/P-L/` and the RCSB mirror confirm they are not extraction artifacts: peptide inhibitor chains (1eb1 retains only PRO 2), UNK placeholders/short stubs (2j9n GLN+UNK; 3e4a/6byz/4hva/3t6y/3t64/3t70 poly-Ala/His), collapsed alternative conformations (5jjm Ser-Asp ×12), and modified HETATM residues (4aze SEP→S; note the overflow record `HETATM17267` without spaces). Chain-wise ATOM+HETATM extraction and modified-residue mapping faithfully retain these chains; no repair is needed.
+5. **Floating-point reserialization drift (identified 2026-08-28):** repeated intermediate reads/writes introduce a 1-ulp difference in `3o56`'s `affinity_value`: current `7.939999999999993e-10`, regenerated by 05+06 `7.939999999999995e-10`, original `metadata.csv` `7.939999999999999e-10`. The pK string remains identical, with no label or split effect. Retain this historical deviation without correction.
+6. **Reproduction audit (2026-08-28):** regenerate `pdbbind_v2020_dataset.csv` from `pdbbind_v2020_metadata_ligand.csv` using 05+06. All 11,663 rows ×36 columns agree except the single 3o56 floating-point deviation above. A full rerun of consolidated `08_cluster_time_split.py` (5,394 clusters; moves 2,866 +1,183 +442) reproduces current train/val/test membership **exactly**.
+7. **Historical changes:** CATH-only fold/superfamily counts 24/45 become 38/73 after TED augmentation. NewEC/LongTailEC use unified all-not-in semantics, replacing `OOD_NewFunction`/`OOD_LongTailFunction`; affinity-bin flags were added later; the toolkit recomputes InD. Backups precede each update in `output/backup_before_*/`.

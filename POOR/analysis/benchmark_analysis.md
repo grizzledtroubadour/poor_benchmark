@@ -1,24 +1,24 @@
-# POOR 论文数据分析与实验规划
+# POOR: Data Analysis and Experiment Planning
 
-## 第一部分：无需训练模型的数据分析（已完成 & 待完成）
+## Part I: Analyses without model training (completed and planned)
 
-### 一、已完成分析
+### I. Completed analyses
 
-#### 1. 数据集规模统计表
+#### 1. Dataset scale statistics
 
-**状态**: ✅ 已完成（2026-09-01 重算）
+**Status:** ✅ Complete (recomputed 2026-09-01)
 
-**文件**: `analysis/output/dataset_scale_stats.json`
+**File**: `analysis/output/dataset_scale_stats.json`
 
-**脚本**: `analysis/scripts/dataset_scale_stats.py`
+**Script**: `analysis/scripts/dataset_scale_stats.py`
 
-**核心结果**:
+**Results**:
 
 ### Classification Tasks
 
 | Task | Train | Val | Test | Total | Labels | Seq Length (median) | Extreme in Train/Val? |
 |------|-------|-----|------|-------|--------|---------------------|----------------------|
-| fold_classification | 43,473 | 6,132 | 12,911 | 62,516 | 1,163 classes (C.A.T) | 9-960 (med=133) | ⚠️ YES (2,940, 5.9%，全部 <60) |
+| fold_classification | 43,473 | 6,132 | 12,911 | 62,516 | 1,163 classes (C.A.T) | 9-960 (med=133) | ⚠️ YES (2,940, 5.9%, all <60) |
 | func_prediction (EC) | 15,389 | 1,687 | 5,047 | 22,123 | 260 classes | 3-1997 (med=298) | ✅ No |
 | func_prediction (GO-MF) | 18,179 | 2,084 | 5,609 | 25,872 | 447 classes | 3-1997 (med=236) | ✅ No |
 | func_prediction (GO-CC) | 13,878 | 1,730 | 5,613 | 21,221 | 264 classes | 3-1997 (med=222) | ✅ No |
@@ -39,28 +39,28 @@
 |------|-------|-----|------|-------|------------|---------------------|----------------------|
 | ligand_binding_site | 71,093 | 7,938 | 17,225 | 96,256 | binary per-residue | 4-1991 (med=291) | ✅ No |
 | ppis_prediction | 6,043 | 672 | 1,980 | 8,695 | binary per-residue | 7-1484 (med=220) | ✅ No |
-| ss_prediction | 29,622 | 3,317 | 8,372 | 41,311 | 8-state + 3-state DSSP | 31-1836 (med=222) | ⚠️ YES (952, 2.9%，全部 <60) |
+| ss_prediction | 29,622 | 3,317 | 8,372 | 41,311 | 8-state + 3-state DSSP | 31-1836 (med=222) | ⚠️ YES (952, 2.9%, all <60) |
 
-**关键发现**:
-- 总样本量：**429,645** 条（Train 303,516 / Val 37,642 / Test 88,487）
-- 序列长度范围：Fold 序列最短（med≈133aa）；回归与结合位点类任务偏长；剔除 >2000 超长样本后，全体单链长度上限为 2000aa
-- 8 个任务的 train/val 无极端长度样本（<60 或 >1000）；4 个任务（fold_classification / ppi_prediction / ligand_binding_affinity / ss_prediction）的 train/val 仍含极端长度单链，其中 **LBA 占比最高**（train/val 的 13.0% 样本含极端长度单链，几乎全为多链复合物中的 >1000aa 长链）；fold 的 2,940 条与 SSP 的 952 条全部为 <60 短样本（只标注不剔除 / 正常划分的设计使然）；PPI 重划分后极端长度占比已降至 2.7%
-- func_prediction 各任务 test 的最短序列（3aa）来自 2026-08 找回的 ExtremeShort 测试样本（仅划入 test，train/val 不受影响）；ss_prediction 的 <60 样本（8,941 条，最短 1aa）为 2026-09-01 恢复、09-02 按原时间 cutoff 正常划分到 train/val/test（详见下文 2026-09-01/02 注记）
-- PPI 唯一的空链样本（O75746 同源二聚体）已于 2026-08-28 从 UniProt 补全序列并修复（见 `datasets/ppi_prediction/DATA_PROCESS.md` Step 5 注记），最小长度 3 为真实短链；LBA 长度按 `|` 拆链统计，最小值 1 为复合物中沉积的短肽/占位链片段（原始 PDB 沉积如此，见 `datasets/ligand_binding_affinity/` 核查记录）
-- 所有任务均包含结构文件引用（pdb/cif）
-- **2026-09-01/02 极端长度口径修正**：① SSP 恢复 <60 链（22,231 条 → 95% 去重 + 与现有 splits 交叉去重 → 8,941 条），并于 09-02 按原时间 cutoff（train≤2019-06-06、val≤2021-02-09）正常划分到 train/val/test（+5,672 / +892 / 2,377），test 短链行 `Default=True` 且 seq/TM/Orphan/IDR/LongTail/NewEC/LongTailEC/Fold-SuperfamilyHoldout 全部按新参考集重算；另剔除 1 条 59% UNK 残基的低质量短链 7UYL_K（序列提取跳过 UNK 而结构保留导致标注错帧）；随后按用户要求仅保留 31–59aa 短链，删除 ≤30aa 共 7,695 条（train 4,838 / val 774 / test 2,083），OOD 各列随之再次按新参考集重算；② pH train 的 3 条 aa_seq<60 样本（P05959/B1KRG2/P0C7A9）移入 test（ES 24→27）；③ fold train 删除唯一 >1000 样本 3w3uA01（1,047aa，建池时按 CATH `length_expected=999` 口径未触发剔除的边界残留）
+**Key findings:**
+- Total: **429,645** samples (train 303,516 /val 37,642 /test 88,487).
+- Fold has the shortest sequences (median ≈133 aa); regression and binding-site tasks tend to be longer. After removing >2000-aa chains, the single-chain upper bound is 2000 aa.
+- Eight task views have no extreme lengths (<60 or >1000) in train/val. Four retain them: fold_classification, ppi_prediction, ligand_binding_affinity, ss_prediction. **LBA has the highest fraction**, 13.0%, almost entirely >1000-aa chains in multichain complexes. All 2,940 fold and 952 SSP extremes are short chains retained/partitioned by design; PPI repartitioning reduces extremes to 2.7%.
+- Function-task minimum test length 3 aa comes from ExtremeShort samples recovered in 2026-08, added only to test. SSP <60-aa chains (8,941, minimum 1 aa) were restored on 2026-09-01 and split by the original time cutoffs on 09-02; see the notes below.
+- The only empty PPI chain, an O75746 homodimer, was completed from UniProt on 2026-08-28 (ppi_prediction/DATA_PROCESS.md, Step 5). Minimum length 3 is a real short chain. LBA lengths are counted after splitting on `|`; minimum 1 reflects deposited short peptides/placeholders, as documented in its audit.
+- Every task references structure files (PDB/CIF).
+- **Extreme-length corrections, 2026-09-01/02:** (1) Restore SSP <60-aa chains: 22,231 →95% deduplication and cross-deduplication against existing splits →8,941; partition on 09-02 using original cutoffs train≤2019-06-06, val≤2021-02-09 (+5,672 /+892 /2,377). Short test chains have Default=True; recompute seq/TM/Orphan/IDR/LongTail/NewEC/LongTailEC/fold-superfamily holdouts against new references. Remove low-quality 7UYL_K (59% UNK), whose sequence extraction skipped UNK retained in the structure and misaligned labels. Then retain only 31–59-aa short chains as requested, removing 7,695 ≤30-aa rows (train 4,838 /val 774 /test 2,083) and recomputing OOD again. (2) Move three short pH training samples P05959/B1KRG2/P0C7A9 to test, ES 24→27. (3) Remove the only >1000-aa fold training sample 3w3uA01 (1,047 aa), missed because its CATH length_expected=999.
 
 ---
 
-#### 2. OOD场景覆盖度矩阵
+#### 2. OOD scenario coverage matrix
 
-**状态**: ✅ 已完成（2026-09-01 重算）
+**Status**: ✅ Complete (recomputed 2026-09-01)
 
-**文件**: `analysis/output/ood_coverage_matrix.csv` / `.md`
+**File**: `analysis/output/ood_coverage_matrix.csv` / `.md`
 
-**脚本**: `analysis/scripts/ood_coverage_matrix.py`
+**Script**: `analysis/scripts/ood_coverage_matrix.py`
 
-**核心结果**（各 OOD 场景在 Test 集中的计数与占比；占比基于全测试集 N_test，`-` 表示该任务无此场景。）:
+**Results:** counts and percentages per test OOD scenario; percentages use the full N_test; `-` means not applicable.
 
 | OOD Scenario | kcat | pH | CATH | EC | GO-BP | GO-CC | GO-MF | LBA | LBS | PPI | PPIS | SSP |
 |:---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -102,29 +102,29 @@
 | Fold holdout | 43 (0.9%) | 91 (3.1%) | - | 31 (0.6%) | 50 (1.0%) | 57 (1.0%) | 31 (0.6%) | 38 (1.6%) | 15 (0.1%) | 44 (0.3%) | 65 (3.3%) | 20 (0.2%) |
 | Superfamily holdout | 160 (3.2%) | 311 (10.5%) | 761 (5.9%) | 103 (2.0%) | 151 (2.9%) | 185 (3.3%) | 186 (3.3%) | 73 (3.1%) | 135 (0.8%) | 265 (1.6%) | 235 (11.9%) | 96 (1.1%) |
 
-> 注：① 列名已按统一 schema 重命名（`OOD_NewFunction` → `OOD_NewEC_L4/L3`、`OOD_LongTailFunction` → `OOD_LongTail_EC_L*` 等；CATH 任务的 `OOD_NewEC` 归入 New EC L4 行）。② 序列同源性 / 结构相似性 / Orphan 等默认在 `Default=True` 子集内判定，非 Default（极端长度先验划分）样本对应列为 NaN，计数按 False 处理、占比分母仍为全测试集。③ `InD subset` 为不属于任何 OOD 场景的样本（显式 `InD` 列）。④ NewEC / LongTailEC 为 all-not-in 口径（以 train 或 train+val 为参考集，EC L3/L4 层级，频次阈值 ≤5/≤10 且含 0）。⑤ `PPI` 为 pair-level（16,264 条），`PPIS` 为残基级 interface（1,980 条），二者 IDR 等比例差异源于 pair-level 判定规则（任一链触发即 True）。⑥ Fold/Superfamily holdout 在非 CATH 任务上基于 CATH+TED 域标注判定（见 `.skills/cath-ted-domain-annotation/`）。
+> Notes: (1) Unified column names replace OOD_NewFunction with OOD_NewEC_L4/L3 and OOD_LongTailFunction with OOD_LongTail_EC_L*. CATH OOD_NewEC is placed in the New EC L4 row. (2) Sequence/structure/Orphan flags are normally evaluated on Default=True only; prior-held-out extreme rows receive NaN, counted as False, while percentages still use the full test denominator. (3) InD means no OOD flag (explicit InD column). (4) NewEC/LongTailEC use all-not-in against train or train+val, L3/L4, thresholds ≤5/≤10 including zero. (5) PPI is pair-level (16,264), PPIS residue-interface level (1,980); IDR differences reflect PPI any-chain semantics. (6) Non-CATH fold/superfamily holdouts use CATH+TED domain annotations; see .skills/cath-ted-domain-annotation/.
 
 ---
 
-#### 3. OOD 正交性 / OOD 场景标记重叠度
+#### 3. OOD orthogonality / scenario-flag overlap
 
-**状态**: ✅ 已完成（2026-09-01 重算）
+**Status**: ✅ Complete (recomputed 2026-09-01)
 
-**文件**: `analysis/output/ood_overlap_matrix.csv`
+**File**: `analysis/output/ood_overlap_matrix.csv`
 
-**脚本**: `analysis/scripts/ood_coverage_matrix.py`（同一脚本输出）
+**Script**: `analysis/scripts/ood_coverage_matrix.py`(same script output)
 
-**方法**: 对每对 OOD 轴在同一任务的 test 集上计算 Jaccard 相似度
-`J(A,B) = |A∩B| / |A∪B|`。`J=0` 表示两个 OOD 集合完全不相交；`J` 接近 1
-表示二者高度重合。重叠度过高的轴不宜同时作为独立评估维度。
+**Method:** compute pairwise test-set Jaccard similarity within each task:
+`J(A,B) = |A∩B| / |A∪B|`. J=0 means disjoint sets; J near 1 means high overlap.
+Highly overlapping axes should not be treated as independent evaluation dimensions.
 
-**核心结果**:
+**Results**:
 
-- 共计算 301 对 OOD 轴组合；整体 Jaccard 均值 **0.071**。
-- **完全正交（J = 0.0）** 的有 **121 对**，例如各任务的 `OOD_ExtremeShort` 与 `OOD_ExtremeLong`、极端长度与 EC 功能新颖性、CATH holdout 与组合泛化等。
-- **高重叠（J > 0.5）** 共 13 对，其中 11 对出现在 **Orphan（无同源命中）** 与 **seq_Redundancy_30（序列同一性 <30%）** 之间——这是预期的，因为 Orphan 是 seq_Redundancy_30 的极限子集：
+- Evaluate 301 OOD-axis pairs; mean Jaccard **0.071**.
+- **121 pairs have J=0**, including ExtremeShort versus ExtremeLong, extreme length versus EC novelty, and CATH holdout versus combinatorial generalization.
+- **13 pairs have J>0.5**, including 11 Orphan versus seq_Redundancy_30 pairs, expected because Orphan is a limiting subset of low-identity proteins:
 
-| 任务 | 重叠轴对 | Jaccard | Orphan 且 <30% | 仅 Orphan | 仅 <30% |
+| Task | Axis pair | Jaccard | Orphan and <30% | Orphan only | <30% only |
 |------|----------|---------|----------------:|----------:|--------:|
 | CATH | OOD_Orphan ∩ seq_Redundancy_30 | 0.841 | 1,978 | 0 | 375 |
 | PPI  | OOD_Orphan ∩ seq_Redundancy_30 | 0.826 | 3,017 | 0 | 636 |
@@ -138,53 +138,53 @@
 | EC   | OOD_Orphan ∩ seq_Redundancy_30 | 0.683 | 498 | 0 | 231 |
 | pH   | OOD_Orphan ∩ seq_Redundancy_30 | 0.655 | 422 | 0 | 222 |
 
-另外 2 对高重叠出现在 LBA（复合物 multimer TM 口径下，结构新颖性与序列低同源度的耦合增强）：
+The remaining two high-overlap pairs occur in LBA, where complex-level multimer TM strengthens sequence–structure novelty coupling:
 
-| 任务 | 重叠轴对 | Jaccard | 交集 | 仅前者 | 仅后者 |
+| Task | Axis pair | Jaccard | Intersection | First only | Second only |
 |------|----------|---------|-----:|-------:|-------:|
 | LBA  | seq_Redundancy_30 ∩ TM-score_0.5 | 0.524 | 152 | 89 | 49 |
 | LBA  | OOD_Orphan ∩ TM-score_0.5 | 0.522 | 131 | 50 | 70 |
 
-- 除上述 13 对外，其余 288 对 Jaccard **均 ≤ 0.448**（最高为 kcat 的
-  Orphan–seq30，同为子集关系但未过 0.5 线），绝大多数
-  （75% 分位数）≤ 0.055。
+- The remaining 288 pairs all have Jaccard **≤0.448**; the maximum is kcat Orphan–seq30, also nested but below 0.5.
+  The vast majority (75th percentile)
+  are ≤0.055.
 
-**按任务平均 Jaccard**（数值越低表示该任务内部 OOD 轴越相互独立）：
+**Mean Jaccard by task:** lower values indicate less overlapping task-specific OOD axes.
 
-| 任务 | 平均 Jaccard | 最高 Jaccard | 说明 |
+| Task | Mean Jaccard | Max Jaccard | Notes |
 |------|-------------:|-------------:|------|
-| kcat | 0.042 | 0.448 | 序列侧 2026-08-30 统一后 Orphan–seq30 降至 0.448（<0.5），任务内最高重叠已低于高重叠线 |
-| LBS  | 0.047 | 0.705 | 最高为 Orphan–seq30（子集关系）；TM-score 改 easy-search 口径后各档间重叠上升，平均值由 0.033 升至 0.048（现 0.047） |
-| PPIS | 0.055 | 0.761 | 受 Orphan–seq30 驱动；TM-score 改 easy-search 口径后平均值由 0.077 降至 0.055；2026-08-29 序列侧（seq_Redundancy/Orphan）统一 easy-search 后均值/极值不变（0.055 / 0.761） |
-| GO-CC | 0.060 | 0.787 | 功能预测；2026-08-30 序列侧统一后 Orphan–seq30 进入高重叠（子集关系） |
-| SSP  | 0.070 | 0.777 | 受 Orphan–seq30 驱动；≤30aa 短链删除后，此前的短链耦合轴组（ES/IDR/TM0.5/Orphan）消失，仅剩 Orphan–seq30 子集关系 |
-| GO-MF | 0.060 | 0.802 | 功能预测；同上 |
-| EC   | 0.064 | 0.683 | 功能预测；同上 |
-| pH   | 0.067 | 0.655 | 受 Orphan–seq30 驱动 |
-| GO-BP | 0.069 | 0.788 | 功能预测；同上 |
-| CATH | 0.105 | 0.841 | 受 Orphan–seq30 驱动 |
-| PPI  | 0.106 | 0.826 | 受 Orphan–seq30 驱动 |
-| LBA  | 0.128 | 0.751 | 受 Orphan–seq30 驱动；复合物 multimer TM 口径后平均值由 0.116 升至 0.128 |
+| kcat | 0.042 | 0.448 | Sequence unification on 2026-08-30 reduces Orphan–seq30 to 0.448, below the high-overlap threshold. |
+| LBS | 0.047 | 0.705 | Orphan–seq30 is largest (nested). TM easy-search increased mean overlap from 0.033 to 0.048; currently 0.047. |
+| PPIS | 0.055 | 0.761 | Driven by Orphan–seq30. TM easy-search reduces the mean from 0.077 to 0.055; sequence easy-search unification on 2026-08-29 leaves mean/max unchanged at 0.055 /0.761. |
+| GO-CC | 0.060 | 0.787 | Function prediction; sequence unification on 2026-08-30 makes nested Orphan–seq30 a high-overlap pair. |
+| SSP | 0.070 | 0.777 | Driven by Orphan–seq30. Removing ≤30-aa chains removes the former ES/IDR/TM0.5/Orphan coupling, leaving the nested pair. |
+| GO-MF | 0.060 | 0.802 | Function prediction; same pattern as above. |
+| EC | 0.064 | 0.683 | Function prediction; same pattern as above. |
+| pH | 0.067 | 0.655 | Driven by Orphan–seq30. |
+| GO-BP | 0.069 | 0.788 | Function prediction; same pattern as above. |
+| CATH | 0.105 | 0.841 | Driven by Orphan–seq30. |
+| PPI | 0.106 | 0.826 | Driven by Orphan–seq30. |
+| LBA | 0.128 | 0.751 | Driven by Orphan–seq30; multimer TM increases mean overlap from 0.116 to 0.128. |
 
-**关键发现**: 去掉 Orphan–低同源度之间的包含关系后，各 OOD 维度基本相互独立，意味着它们捕获的是**互补的分布偏移类型**，适合作为多轴 OOD 评估基准。
+**Finding:** after excluding the Orphan–low-identity nesting, OOD dimensions are largely independent in this overlap analysis, capturing **complementary shift types** for multi-axis evaluation.
 
-**论文用途**: Figure 2（OOD Overlap Matrix）或 Supplementary Table
+**Paper use**: Figure 2(OOD Overlap Matrix) or Supplementary Table
 
 ---
 
-#### 4. 标签长尾分布
+#### 4. Label long-tail distribution
 
-**状态**: ✅ 已完成（2026-09-14 修正统计口径：改为逐标签频次，与论文 Table 1 类别数一致；原"标签组合"口径保留为 combo_* 参考值）
+**Status:** ✅ Complete; corrected 2026-09-14 to per-label frequencies matching paper Table 1. Old label-combination counts remain as combo_* references.
 
-**文件**: `analysis/output/label_distribution.json`
+**File**: `analysis/output/label_distribution.json`
 
-**脚本**: `analysis/scripts/label_distribution.py`（train 集逐标签频率，多标签按 `;` 拆分；SSP 为逐残基 token；另输出 combo_* 组合口径）
+**Script:** `analysis/scripts/label_distribution.py`: training per-label frequencies, splitting multilabel strings on `;`; SSP counts residue tokens. Also outputs combo_* statistics.
 
-**口径说明**: 主表为**逐标签**统计（每个 EC 编号 / GO term 计为一类），与论文 Table 1 的类别数一致。旧版数字（EC 558、GO-MF 3,436 等）实为**标签组合**口径（整条 label 字符串作为一个单位）；组合口径数值现保留在 JSON 的 `combo_*` 字段。
+**Definition:** each EC number /GO term is a class, matching Table 1. Old counts such as EC 558 and GO-MF 3,436 counted whole label strings as combinations; retained in JSON combo_* fields.
 
-**核心结果**（逐标签口径）:
+**Results**(per-label definition):
 
-| 任务 | 标签数 | Head 20%覆盖 | Tail 50%覆盖 | Singletons比例 | Zipf系数 |
+| Task | Labels | Top-20% coverage | Bottom-50% coverage | Singleton fraction | Zipf exponent |
 |------|--------|-------------|-------------|---------------|----------|
 | EC | 260 | 75.4% | 4.9% | 7.7% | -1.596 |
 | GO-MF | 447 | 77.9% | 7.0% | 0.0% | -1.277 |
@@ -193,49 +193,49 @@
 | SSP | 9 | 53.6% | 7.7% | 0.0% | -1.763 |
 | Fold | 1,163 | 86.6% | 3.8% | 14.0% | -1.445 |
 
-**类别不平衡（二分类任务）**:
+**Class imbalance (binary tasks)**:
 
-| 任务 | Train Pos% | Test Pos% |
+| Task | Train Pos% | Test Pos% |
 |------|-----------|-----------|
 | PPI | 50.0% | 50.0% |
-| PPIS（残基级） | 22.8% | 22.9% |
+| PPIS(residue-level) | 22.8% | 22.9% |
 
-**回归任务标签分布**:
+**Regression target distributions**:
 
-| 任务 | Train Mean±Std | Test Mean±Std | Range |
+| Task | Train Mean±Std | Test Mean±Std | Range |
 |------|---------------|---------------|-------|
 | LBA | 6.26 ± 1.97 | 6.11 ± 1.80 | [0.40, 15.22] |
 | kcat | 0.88 ± 1.67 | 0.93 ± 1.62 | [-6.00, 6.00] |
 | pH | 7.13 ± 1.28 | 7.39 ± 1.08 | [1.50, 12.50] |
 
-**关键发现**:
-- 逐标签口径下，GO 任务无 singleton 标签，但仍高度倾斜：Head 20% 覆盖 68.8%–82.6%，Zipf 平缓（-1.00 ~ -1.31）
-- GO-BP 词表最大（884 类）且 Zipf 最平缓（-0.995），头部覆盖最低（68.8%）
-- EC 为 260 个 L3 类，singletons 7.7%，Zipf -1.596
-- Fold 重划分为 C.A.T 粒度后类别数从 41 增至 1,163，singletons 14.0%，为分类任务中 singleton 尾部最重
-- 标签组合口径（combo_*，参考）：EC 558 种组合（singletons 31.7%）、GO-MF 3,436（63.6%）、GO-CC 2,506（75.6%）、GO-BP 3,191（70.1%），反映多标签标注组合的高度唯一性
-- SSP 标签为 9 个有效 DSSP 状态（0–8，旧版"16"为未剥离 `[`/`]` 的 token 计数瑕疵，已修正）
-- PPIS 残基级阳性率 22.8%（旧版 99.2% 为统计口径错误——误按"含任意阳性残基的样本比例"计算，已修正）， PPI 样本级严格 1:1 平衡
+**Key findings**:
+- GO has no singleton labels but remains strongly skewed: top 20% covers 68.8%–82.6%, with shallow Zipf slopes -1.00 to -1.31.
+- GO-BP has the largest vocabulary (884), shallowest Zipf slope (-0.995), and lowest head coverage (68.8%).
+- EC has 260 L3 classes, 7.7% singletons, Zipf -1.596.
+- C.A.T-level fold repartitioning increases classes from 41 to 1,163, with 14.0% singletons, the heaviest singleton tail among classification tasks.
+- Reference combo_* counts: EC 558 combinations (31.7% singletons), GO-MF 3,436 (63.6%), GO-CC 2,506 (75.6%), GO-BP 3,191 (70.1%), showing highly unique multilabel combinations.
+- SSP has nine valid DSSP states 0–8. The old count 16 resulted from unstripped `[`/`]` tokens and is corrected.
+- PPIS residue-positive rate is 22.8%; the old 99.2% incorrectly counted samples containing any positive residue. PPI remains exactly 1:1 at sample level.
 
-**论文用途**: Figure 3（Label Long-Tail Distribution / Zipf Curves）
+**Paper use**: Figure 3(Label Long-Tail Distribution / Zipf Curves)
 
 ---
 
-#### 5. 蛋白质实验结构数据占比
+#### 5. Experimental structure coverage
 
-**状态**: ✅ 已完成（2026-09-01 重算）
+**Status**: ✅ Complete (recomputed 2026-09-01)
 
-**文件**: `analysis/output/structure_source_stats.json`
+**File**: `analysis/output/structure_source_stats.json`
 
-**脚本**: `analysis/scripts/compute_structure_source_stats.py`
+**Script**: `analysis/scripts/compute_structure_source_stats.py`
 
-**方法**: 依据最终划分文件中的 `struct_file`（或 `struct_file1`/`struct_file2`）命名规则判定结构来源：
-- `AF-*` 或 `af__*` 视为 **AlphaFold 预测结构**；
-- 其余 PDB/CATH/SIFTS/PDBbind 来源视为 **实验结构**；
-- `enzyme_optimal_ph` 使用 `metadata.csv` 中的 `structure_source`（`AF`/`PDB`）字段；
-- `ppi_prediction` 为 pair-level，若两条链中**任一链**为 AlphaFold 则该 pair 计入 Predicted。
+**Method:** infer structure source from final struct_file or struct_file1/struct_file2 naming:
+- `AF-*` or `af__*`: **AlphaFold predictions**.
+- Other PDB/CATH/SIFTS/PDBbind sources: **experimental structures**.
+- enzyme_optimal_ph uses metadata.csv structure_source (`AF`/`PDB`).
+- PPI is pair-level: count a pair as predicted if **either chain** is AlphaFold.
 
-**核心结果**:
+**Results**:
 
 | Task | Train (N / Exp% / Pred%) | Val (N / Exp% / Pred%) | Test (N / Exp% / Pred%) | Source |
 |:-----|:-------------------------|:-----------------------|:------------------------|:-------|
@@ -248,47 +248,47 @@
 | GO-MF | 18,179 / 100.0% / 0.0% | 2,084 / 100.0% / 0.0% | 5,609 / 100.0% / 0.0% | RCSB PDB (SIFTS) |
 | LBA | 8,366 / 100.0% / 0.0% | 930 / 100.0% / 0.0% | 2,367 / 100.0% / 0.0% | PDBbind v2020/v2024 |
 | LBS | 71,093 / 100.0% / 0.0% | 7,938 / 100.0% / 0.0% | 17,225 / 100.0% / 0.0% | RCSB PDB local mirror |
-| PPI | 58,968 / 10.7% / 89.3% | 8,394 / 4.8% / 95.2% | 16,264 / **3.5%** / **96.5%** | PINDER (pair-level; 任一链为 AF 即计 Predicted) |
+| PPI | 58,968 / 10.7% / 89.3% | 8,394 / 4.8% / 95.2% | 16,264 / **3.5%** / **96.5%** | PINDER (pair-level; predicted if either chain is AF) |
 | PPIS | 6,043 / 100.0% / 0.0% | 672 / 100.0% / 0.0% | 1,980 / 100.0% / 0.0% | DIPS-PLUS (RCSB PDB) |
 | SSP | 29,622 / 100.0% / 0.0% | 3,317 / 100.0% / 0.0% | 8,372 / 100.0% / 0.0% | RCSB PDB (X-ray/NMR/EM filtered) |
 
-**按样本汇总**（含 pair-level 任务的样本计数）:
+**Sample-level totals**, including pair-level task samples:
 
-| 类别 | 样本数 | 占比 |
+| Category | Samples | Fraction |
 |:-----|------:|-----:|
-| 实验结构 (Experimental) | 321,792 | 74.9% |
-| 预测结构 (Predicted) | 107,853 | 25.1% |
-| **合计** | **429,645** | **100.0%** |
+| Experimental structures | 321,792 | 74.9% |
+| Predicted structures | 107,853 | 25.1% |
+| **Total** | **429,645** | **100.0%** |
 
-> 注：PPI 按 pair 计数；若把 PPI 的两条链拆开为链级统计，则实验链数会进一步上升，但 pair-level 评估以 pair 为单位，因此按 pair 汇报。PPI 负样本中的 XTAL 晶体 pair 全部为实验结构，因此重划分后实验结构占比（尤其 train）较旧版有所上升。
+> PPI counts pairs, not individual chains. Chain-level experimental coverage would be higher, but pair-level reporting matches evaluation. All XTAL crystal-packing negatives use experimental structures; repartitioning increases experimental fractions, especially in training.
 
-**关键发现**:
-- **100% 实验结构**：Fold、EC、GO-BP/GO-CC/GO-MF、LBA、LBS、PPIS、SSP。
-- **100% AlphaFold 预测**：kcat（train/val/test 全部为 AF v6）。
-- **混合来源**：optimal_ph 的 train/val 全为 AF，test 中 93.0% 为 PDB 实验结构（来自 Enzyme Optimum pH 数据库），7.0% 为 AF；PPI 的 test 中 96.5% 的 pair 至少含一条 AF 链，实验 pair 仅占 3.5%。
-- 整体上，**74.9%** 的样本使用实验结构，**25.1%** 使用 AlphaFold 预测结构；预测结构主要集中在 PPI 和 kcat 任务。
+**Key findings**:
+- **100% experimental:** Fold, EC, GO-BP/CC/MF, LBA, LBS, PPIS, SSP.
+- **100% AlphaFold:** kcat, all splits use AF v6.
+- **Mixed:** pH train/val are all AF; test is 93.0% experimental PDB from the Enzyme Optimum pH database and 7.0% AF. PPI test pairs are 96.5% at least one AF chain, 3.5% fully experimental.
+- Overall: **74.9%** experimental, **25.1%** AlphaFold, concentrated in PPI and kcat.
 
-**论文用途**: Table 1 或 Supplementary Table（Dataset / Structure Source Overview）
+**Paper use**: Table 1 or Supplementary Table (Dataset / Structure Source Overview)
 
 ---
 
-#### 7. 数据质量报告
+#### 7. Data quality report
 
-**状态**: 🔄 完成
+**Status**: 🔄 Complete
 
-> **快照说明**：§7.1–§7.4 的数字为 2026-07 初快照（结构/序列级重核对未随 08 月数据集更新重跑，fold/PPI 等已重划分任务的绝对计数会有出入，但结论性质不变）；§7.5–§7.6 为 2026-08 新增内容。
+> **Snapshot:** §7.1–7.4 use early-2026-07 counts; structure/sequence audits were not rerun for August dataset updates. Absolute counts for repartitioned fold/PPI may differ, while qualitative findings remain. §7.5–7.6 were added in 2026-08.
 
-**7.1 aa_seq 与结构提取序列一致性**
+**7.1 Agreement between aa_seq and structure-derived sequences**
 
-对全部任务的 train/val/test 划分，逐样本解析结构文件（`pdbs/` 或 `pdb_file` 列引用）的 ATOM 记录、逐链提取氨基酸序列（含常见修饰残基映射），与 `aa_seq` 比对。PPI 为 pair-level，按 A/B 两条链分别核对（下表 TOTAL 为链数）。
+Parse ATOM records from each train/val/test structure (pdbs/ or pdb_file references), extract chains with modified-residue mapping, and compare to aa_seq. Check PPI chains A/B separately; TOTAL below counts chains.
 
-- **脚本**: ~~`analysis/scripts/verify_aa_seq_vs_structure.py`~~（2026-09 analysis/scripts 清理时移除，结果快照保留）
-- **结果**: `analysis/output/aa_seq_structure_consistency.json`
-- **规模**: 518,470 条待核对序列，318,673 个去重结构文件
+- **Script:** ~~`analysis/scripts/verify_aa_seq_vs_structure.py`~~, removed during 2026-09 cleanup; result snapshots retained.
+- **Results**: `analysis/output/aa_seq_structure_consistency.json`
+- **Scale:** 518,470 sequences, 318,673 deduplicated structure files.
 
-分类定义：`EXACT`=逐字节一致；`结构多出`=aa_seq 是结构序列子串（结构解析出更多残基）；`aa_seq更长`=结构序列是 aa_seq 子串（结构有未解析残基/缺失密度）；`MISMATCH`=既不相等也非子串（多为内部单残基 indel 或前导 `X` 占位导致的错位，抽样比对显示仍为同一蛋白，中位一致度 ~0.98）。
+Categories: EXACT =byte-identical; structure-longer =aa_seq is a substring of extracted structure; aa_seq-longer =structure is a substring of aa_seq (unresolved residues/density); MISMATCH =neither equal nor substring, usually internal single-residue indels or leading X placeholders. Sampled alignments confirm the same protein, median identity ≈0.98.
 
-| 任务 | 核对数 | EXACT | 完全一致率 | 结构多出 | aa_seq更长 | MISMATCH | 空结构 |
+| Task | Checked | EXACT | Exact fraction | Structure longer | aa_seq longer | MISMATCH | Empty structures |
 |------|------:|------:|------:|------:|------:|------:|------:|
 | kcat | 22,631 | 22,631 | **100.0%** | 0 | 0 | 0 | 0 |
 | optimal_ph | 11,615 | 11,615 | **100.0%** | 0 | 0 | 0 | 0 |
@@ -296,389 +296,389 @@
 | ppis | 8,695 | 8,682 | **99.9%** | 0 | 0 | 13 | 0 |
 | ss | 40,066 | 34,384 | **85.8%** | 280 | 501 | 4,901 | 0 |
 | func | 87,150 | 73,697 | **84.6%** | 394 | 10,029 | 3,030 | 0 |
-| PPI（按链） | 177,344 | 144,623 | **81.5%** | 2,385 | 9,953 | 20,383 | 0 |
+| PPI(per chain) | 177,344 | 144,623 | **81.5%** | 2,385 | 9,953 | 20,383 | 0 |
 | LBA | 11,663 | 5,264 | **45.1%** | 0 | 6,395 | 4 | 0 |
 | fold | 62,896 | 24,764 | **39.4%** | 10 | 16,618 | 21,502 | 2 |
-| **合计** | **518,470** | **421,704** | **81.3%** | 3,070 | 43,496 | 50,038 | 2 |
+| **Total** | **518,470** | **421,704** | **81.3%** | 3,070 | 43,496 | 50,038 | 2 |
 
-**结论与解读**：
-- **完全一致**：`kcat`、`optimal_ph`（AlphaFold 全长模型，序列即结构）；`LBS`（99.8%）、`ppis`（99.9%）实质一致，非一致仅为个别点差异/单残基 indel。
-- **系统性差异（非错配，同一蛋白）**：
-  - `fold`：`aa_seq` 为**整链序列**（常含前导 `X` 占位），结构为 **CATH 域**——长度/起点不同；抽样比对中位一致度 0.98。
-  - `LBA`：绝大多数为 `aa_seq更长`——沉积 PDB 有大量未解析残基（晶体缺失密度），序列高度一致但结构不完整。
-  - `func`：非一致主要是 `aa_seq更长`（SIFTS 子序列 vs 结构缺失残基）。
-  - `PPI`：81.5% 完全一致，其余多为结构缺失残基或 AlphaFold 全长 vs 截断链，同一蛋白。
-  - `ss`：非一致的 ~14% 抽样中位一致度 0.989（100% ≥0.95），为单残基 indel；**对逐残基任务意味着这些样本"标签↔结构"存在 1 残基级错位，需评估**。
-- **确凿的坏样本**：`fold` 有 **2 个空结构文件**（`4bpe000`、`4v19000`，0 残基），应单独修复或剔除。
-- **总体**：未发现"序列-结构张冠李戴"式错配；全部非一致均为同一蛋白的细节差异（缺失残基 / indel / 前导 X / 域 vs 整链）。
+**Interpretation:**
+- **Exact:** kcat/pH, full-length AlphaFold; LBS 99.8% and PPIS 99.9% are essentially consistent, with isolated substitutions/indels.
+- **Systematic differences within the same protein:**
+  - Fold aa_seq is a whole chain, often with leading X placeholders, while structures are CATH domains; length/start differs, sampled median identity 0.98.
+  - LBA mostly has longer aa_seq because deposited structures omit unresolved residues; sequence agreement is high but structures are incomplete.
+  - Function mismatches are mainly longer aa_seq: SIFTS subsequences versus unresolved structural residues.
+  - PPI exact agreement is 81.5%; remaining cases mostly unresolved residues or full-length AF versus truncated chains of the same protein.
+  - SSP: sampled median identity 0.989 among ≈14% non-exact cases (all ≥0.95), reflecting single-residue indels. **Residue tasks can have one-residue label–structure offsets requiring assessment.**
+- **Definite bad samples:** two empty fold structures, 4bpe000 and 4v19000, with zero residues; repair or remove separately.
+- **Overall:** no evidence of unrelated sequence–structure pairing; differences concern the same protein: missing residues, indels, leading X, domains versus whole chains.
 
-**7.2 残基级任务三方一致性（LBS / ppis / ss）**
+**7.2 Three-way residue-task consistency (LBS / ppis / ss)**
 
-对三个 per-residue 任务，核对 `aa_seq` ↔ 结构提取序列 ↔ 逐残基标注 三者一致性。
+For three residue-level tasks, compare aa_seq, structure-derived sequences, and residue annotations.
 
-- **脚本**: ~~`analysis/scripts/residue_level_consistency.py`~~（2026-09 analysis/scripts 清理时移除，结果快照保留）
-- **结果**: `analysis/output/residue_level_consistency.json`
+- **Script:** ~~`analysis/scripts/residue_level_consistency.py`~~, removed during 2026-09 cleanup; snapshots retained.
+- **Results**: `analysis/output/residue_level_consistency.json`
 
-**关键结论：`len(labels) == len(aa_seq)` 在三任务全部 145,017 个样本上 100% 成立**——标注与 `aa_seq` 严格逐残基对齐，无一例外。因此"标注 ↔ 结构"的一致性等价于"`aa_seq` ↔ 结构"的一致性。
+**Finding: len(labels)==len(aa_seq) for all 145,017 samples**, so annotations align to aa_seq residue by residue. Label–structure consistency therefore reduces to aa_seq–structure consistency.
 
-| 任务 | 标注长度==aa_seq | aa_seq==结构 | 主要不一致原因 | 非一致中位一致度 |
+| Task | Label length==aa_seq | aa_seq==structure | Main discrepancy | Median non-exact identity |
 |------|:---:|------:|------|:---:|
-| LBS | 100% (96,256) | 100% | 211 例已由结构序列替换 `aa_seq`（单残基末端替换），标注与结构完全对齐 | 1.000 |
-| ppis | 100% (8,695) | 99.9% | 154 例低质量/占位符结构已删除，61 例已按全局对齐裁剪为代表链；剩余 13 例结构与 aa_seq 等长（6 例纯替换 + 7 例内部 indel 抵消） | 0.989 |
-| ss | 100% (40,066) | 85.8% | 4,737 例结构内部缺失残基 + 501 端部缺失（晶体未解析密度），已用 `-1` 掩码 | 0.990 |
+| LBS | 100% (96,256) | 100% | Replace aa_seq with structural sequences in 211 terminal-substitution cases; labels align fully. | 1.000 |
+| ppis | 100% (8,695) | 99.9% | Remove 154 low-quality/placeholders and align/crop 61 structures; 13 remaining equal-length cases: six substitutions and seven cancelling internal indels. | 0.989 |
+| ss | 100% (40,066) | 85.8% | 4,737 internal and 501 terminal unresolved-residue cases, masked with -1. | 0.990 |
 
-**标注编码与掩码机制**：
-- **LBS**：标注 `{0,1}`（结合位点二分类），无掩码；`aa_seq==结构` 达 100%，标注逐残基对齐结构。
-- **ppis**：标注 `{0,1,-1}`，`-1`（140 个残基）= 该残基在 PDB 中存在但原始界面标注缺失（文档已定义）。结构-序列-标注长度已统一。
-- **ss**：标注 `{0..8, -1}`，其中 **`-1`（30,051 个残基）= aa_seq 中未被结构解析的残基（缺失密度）的掩码**。验证：`#(标注≥0) == 结构残基数` 占 97.8%、`#(-1) == (aa_len − 结构长度)` 占 98.9%——即 ss 的 `aa_seq` 是完整序列、结构仅含已解析残基、缺失部分在标注中以 `-1` 掩码。**故 ss 的 aa_seq 与结构长度差异并非错误，而是被 `-1` 完整记账**。
+**Label encoding and masking**:
+- **LBS:** labels {0,1}, binding-site binary classification without masks; aa_seq matches structures 100%, with aligned residue annotations.
+- **PPIS:** labels {0,1,-1}; -1 at 140 residues denotes structural residues lacking source interface labels. Structure/sequence/label lengths are unified.
+- **SSP:** labels {0..8,-1}. **-1 masks 30,051 unresolved aa_seq residues.** Nonnegative-label count equals structural residues in 97.8%; -1 count equals aa_len minus structure length in 98.9%. Full aa_seq and resolved-only structures differ by design, with missing positions accounted for by -1.
 
-**逐任务原因诊断**：
-- **LBS（211 例）**：已将 `aa_seq` 替换为结构提取序列，消除末端单残基替换；内部残基与标注完全对齐，影响可忽略。
-- **ppis（13 例）**：已删除 154 例无法恢复的低质量/占位符结构，并将 61 例不一致结构按全局对齐裁剪为代表链（跳过结构插入、保留与 `aa_seq` 一一对应的残基）。剩余 13 例结构长度与 `aa_seq` / 标注完全一致（6 例纯点替换 + 7 例内部插入-缺失长度抵消），标注逐残基对齐。
-- **ss（5,238 例）**：绝大多数为结构未解析残基（内部/端部缺失密度），`aa_seq` 完整而结构不完整，标注已用 `-1` 掩码处理，属设计性一致；非一致中位一致度 0.99。
+**Task-specific diagnosis**:
+- **LBS, 211 cases:** replace aa_seq with extracted structural sequences, removing terminal substitutions; internal labels align and effects are negligible.
+- **PPIS, 13 cases:** remove 154 unrecoverable low-quality/placeholders; align/crop 61 structures, skipping insertions and retaining residues matched one-to-one to aa_seq. The remaining 13 are equal-length (six substitutions, seven cancelling indels), with aligned labels.
+- **SSP, 5,238 cases:** mostly internal/terminal unresolved density, with complete sequences and incomplete structures. -1 masks preserve consistency by design; median non-exact identity 0.99.
 
-**ss 结构输入的专用视图**：`splits/` 的全序列 + `-1` 掩码适合序列输入模型；但对结构输入模型，实测约 2.6%（207/8,079 test）样本的 `-1` 掩码未如实记录所有内部缺口，"丢弃 `-1`" 会静默错帧。为此新增**结构原生视图** `datasets/ss_prediction/splits/splits_struct_native/`（脚本已归档：`datasets/ss_prediction/output/scripts_archive/build_ss_struct_native.py`）：`aa_seq` = `pdbs/` 的 CA 序列（模型实际输入），`labels` = 以 DSSP `ss8` 为源经全局比对映射到每个结构残基，`len(labels)==len(aa_seq)==M(pdb)` 在全部 40,066 条上成立、结构-标签严格 1:1（DSSP 精确 98.8% / 比对 1.2% / 回退 6，identity 均值 0.99992，无隔离样本）。该视图后续已弃用（见下注）。
+**Structure-input SSP view:** full-sequence splits with -1 masks suit sequence models, but ≈2.6% (207/8,079 test) masks miss internal gaps, so simply dropping -1 silently misaligns labels. The structure-native view at datasets/ss_prediction/splits/splits_struct_native/ (archived script: datasets/ss_prediction/output/scripts_archive/build_ss_struct_native.py) uses structural CA sequences as aa_seq and globally maps DSSP ss8 labels to every structural residue. All 40,066 rows satisfy len(labels)==len(aa_seq)==M(pdb), strict 1:1 alignment: 98.8% exact DSSP, 1.2% alignment, six fallbacks, mean identity 0.99992, no quarantines. Later deprecated below.
 
-> **2026-08-28 弃用**：主 `splits/` 新增 `struct_label` 列（与 struct_native 的 label 同源同值、残基枚举为全 ATOM 口径，且 OOD 列保持同步）后，该视图已冗余，归档至 `datasets/ss_prediction/output/splits_struct_native_deprecated/`。结构模型请使用主 `splits/` + `struct_label`。
+> **Deprecated 2026-08-28:** main splits now include struct_label from the same source/values as struct_native, enumerating all ATOM residues and retaining synchronized OOD columns. Archive: datasets/ss_prediction/output/splits_struct_native_deprecated/. Structure models should use main splits plus struct_label.
 
-**7.3 序列合法性检查（非法氨基酸字符）**
+**7.3 Sequence legality (invalid amino-acid characters)**
 
-对全部 12 个任务视图共 **552,093 条序列 / 约 1.68 亿残基** 逐字符扫描（脚本 ~~`analysis/scripts/sequence_legality.py`~~，2026-09 清理时移除；结果 `analysis/output/sequence_legality.json`）。字符分四类：标准 20 种 `ACDEFGHIKLMNPQRSTVWY`、IUPAC 歧义/稀有码 `X B Z J U O`、链分隔符 `|`、其余一律判为非法。
+Scan **552,093 sequences /≈168 million residues** across 12 task views character by character. Script ~~analysis/scripts/sequence_legality.py~~ was removed in 2026-09; results: analysis/output/sequence_legality.json. Classes: standard 20 ACDEFGHIKLMNPQRSTVWY; IUPAC ambiguity/rare X B Z J U O; chain separator |; all others invalid.
 
-**核心结论：0 条非法字符、0 条空/NaN 序列**——无小写、数字、间隔符（`-./*`）、空白或乱码。所有非标准字符均为生物学合法编码或格式约定，无需清洗。
+**Zero invalid characters and zero empty/NaN sequences:** no lowercase, digits, punctuation (-./*), whitespace, or corrupt characters. Nonstandard characters are biologically valid or formatting conventions; no cleaning needed.
 
-| 任务 | #序列 | 空/NaN | 含歧义码 | 含分隔符 | 非法 | 非标准字符明细 |
+| Task | #Sequences | Empty/NaN | Ambiguous codes | Separators | Invalid | Nonstandard character details |
 |------|------:|:---:|------:|------:|:---:|------|
 | kcat | 22,631 | 0 | 0 | 0 | 0 | — |
 | optimal_ph | 11,615 | 0 | 0 | 0 | 0 | — |
-| fold(CATH) | 62,517 | 0 | 10,922 | 0 | 0 | `X`×47,977（前导占位/未解析残基） |
+| fold(CATH) | 62,517 | 0 | 10,922 | 0 | 0 | `X`×47,977(leading placeholders/unresolved residues) |
 | func_EC | 22,123 | 0 | 15 | 0 | 0 | `X`×611 |
 | func_GO-BP | 22,116 | 0 | 13 | 0 | 0 | `X`×478 |
 | func_GO-CC | 21,221 | 0 | 21 | 0 | 0 | `X`×618 |
 | func_GO-MF | 25,872 | 0 | 22 | 0 | 0 | `X`×735 |
-| LBA | 11,663 | 0 | 0 | 6,393 | 0 | `\|`×12,657（多链复合物分隔符） |
+| LBA | 11,663 | 0 | 0 | 6,393 | 0 | `\|`×12,657(multichain complex separators) |
 | LBS | 96,256 | 0 | 0 | 0 | 0 | — |
-| PPI | 167,252 | 0 | 272 | 0 | 0 | `X`×409, `B`×101, `U`×58（硒代半胱氨酸）, `Z`×41, `O`×2（吡咯赖氨酸） |
+| PPI | 167,252 | 0 | 272 | 0 | 0 | `X`×409, `B`×101, `U`×58(selenocysteine), `Z`×41, `O`×2(pyrrolysine) |
 | PPIS | 8,695 | 0 | 0 | 0 | 0 | — |
 | SSP | 40,066 | 0 | 0 | 0 | 0 | — |
-| SSP(struct-native) | 40,066 | 0 | 16 | 0 | 0 | `X`×161（CA 提取的非标准残基） |
+| SSP(struct-native) | 40,066 | 0 | 16 | 0 | 0 | `X`×161(nonstandard residues from CA extraction) |
 
-> 注：`#序列` 中 PPI 按两条链分别计数（`aa_seq1` + `aa_seq2`），LBA 的 `|` 用于分隔同一复合物的多条链（如同源四聚体=4×468aa）。下游 dataloader 需按 `|` 拆链、并对 `X/B/Z/J/U/O` 做 tokenizer 兜底（多数蛋白语言模型已内置 `X`/`<unk>`）。
+> PPI sequence counts include aa_seq1 and aa_seq2 separately. LBA | separates chains within a complex, e.g. a homotetramer is 4×468 aa. Dataloaders must split chains and handle X/B/Z/J/U/O through tokenizer fallbacks (most pLMs already provide X/<unk>).
 
-**7.4 格式一致性审查（列名 schema + 标签格式）**
+**7.4 Schema and label-format consistency**
 
-在完成全库列名统一（`label`/`aa_seq(1,2)`/`struct_file(1,2)`、`OOD_` 前缀、`OOD_NewEC_L*`/`OOD_LongTail(_EC_L*)` 等）后，对全部 13 个任务视图、39 个 split 文件做结构化审查（脚本 `analysis/scripts/format_consistency.py`，结果 `analysis/output/format_consistency.json`）。
+After project-wide schema unification (label/aa_seq(1,2)/struct_file(1,2), OOD_ prefixes, OOD_NewEC_L*/OOD_LongTail(_EC_L*)), audit 13 task views and 39 split files. Script: analysis/scripts/format_consistency.py; results: analysis/output/format_consistency.json.
 
-审查维度：核心列齐全、无弃用列残留（`labels`/`file_type`/`pdb_file*`/`is_time_cutoff`/`OOD-*`/`OOD_NewFunction*`/`OOD_LongTailFunction*`/`OOD_CATH_*`/`protein_*_seq`）、`label` 非空、train/val 无 OOD 列而 test 含 `Default`+OOD、per-residue 任务 `len(label)==len(aa_seq)`、train/val/test 间 `unique_id` 无泄漏、train/val 列集一致。
+Check complete core columns; no obsolete labels/file_type/pdb_file*/is_time_cutoff/OOD-*/OOD_NewFunction*/OOD_LongTailFunction*/OOD_CATH_*/protein_*_seq; nonempty labels; OOD only in test with Default; residue label/sequence length agreement; no cross-split unique_id leakage; matching train/val column sets.
 
-**核心结论：194/194 项结构化检查全部通过。**
+**All 194/194 structured checks pass.**
 
-| 任务 | Train/Val/Test | label 类型 | 核心列齐 | 弃用列 | 跨集泄漏 | per-res 长度 |
+| Task | Train/Val/Test | Label type | Complete core columns | Obsolete columns | Cross-split leakage | Residue lengths |
 |------|---------------:|:---:|:---:|:---:|:---:|:---:|
-| kcat | 15479/2150/5002 | float（回归） | ✅ | 0 | 无 | — |
-| optimal_ph | 7797/866/2952 | float（回归） | ✅ | 0 | 无 | — |
-| fold(CATH) | 34963/4994/22939 | str（C.A 码，需 dtype=str） | ✅ | 0 | 无 | — |
-| func_EC | 15389/1687/4243 | str | ✅ | 0 | 无 | — |
-| func_GO-BP | 15232/1742/4121 | str | ✅ | 0 | 无 | — |
-| func_GO-CC | 13878/1730/4256 | str | ✅ | 0 | 无 | — |
-| func_GO-MF | 18179/2084/4609 | str | ✅ | 0 | 无 | — |
-| LBA | 8366/930/2367 | float（回归） | ✅ | 0 | 无 | — |
-| LBS | 71093/7938/17225 | str | ✅ | 0 | 无 | ✅ |
-| PPI | 65020/7195/16457 | int（0/1） | ✅ | 0 | 无 | — |
-| PPIS | 6043/672/1980 | str | ✅ | 0 | 无 | ✅ |
-| SSP | 28788/3199/8079 | str | ✅ | 0 | 无 | ✅ |
-| SSP(struct-native) | 28788/3199/8079 | str | ✅ | 0 | 无 | ✅ |
+| kcat | 15479/2150/5002 | float(regression) | ✅ | 0 | None | — |
+| optimal_ph | 7797/866/2952 | float(regression) | ✅ | 0 | None | — |
+| fold(CATH) | 34963/4994/22939 | str(C.A codes; require dtype=str) | ✅ | 0 | None | — |
+| func_EC | 15389/1687/4243 | str | ✅ | 0 | None | — |
+| func_GO-BP | 15232/1742/4121 | str | ✅ | 0 | None | — |
+| func_GO-CC | 13878/1730/4256 | str | ✅ | 0 | None | — |
+| func_GO-MF | 18179/2084/4609 | str | ✅ | 0 | None | — |
+| LBA | 8366/930/2367 | float(regression) | ✅ | 0 | None | — |
+| LBS | 71093/7938/17225 | str | ✅ | 0 | None | ✅ |
+| PPI | 65020/7195/16457 | int(0/1) | ✅ | 0 | None | — |
+| PPIS | 6043/672/1980 | str | ✅ | 0 | None | ✅ |
+| SSP | 28788/3199/8079 | str | ✅ | 0 | None | ✅ |
+| SSP(struct-native) | 28788/3199/8079 | str | ✅ | 0 | None | ✅ |
 
-其余 12 个任务的 `label` 类型均符合语义：回归任务（kcat/optimal_ph/LBA）为 float、PPI 交互为 int、多标签（EC/GO）与 per-residue（LBS/PPIS/SSP）为 str。
+The other 12 task views use semantically appropriate labels: float for kcat/pH/LBA regression, int for PPI, strings for EC/GO multilabel and LBS/PPIS/SSP residue targets.
 
-**论文用途**: Supplementary Material（数据质量）
+**Paper use**: Supplementary Material(data quality)
 
-**7.5 struct_label 列（残基级任务的结构对齐标注，2026-08 新增）**
+**7.5 struct_label: structure-aligned residue labels (added 2026-08)**
 
-三个残基级任务（LBS / PPIS / SSP）的全部 split 新增末列 `struct_label`：按 pdb 文件全 ATOM 残基（含无 CA 残基，按 `(chain, resseq, icode)` 首次出现顺序）逐残基对齐的标注，`-1` 为 ignore index。结构输入模型可直接以 `pdbs/` 结构 + `struct_label` 训练评估，无需再做序列-结构比对。
+All splits of LBS/PPIS/SSP add a final struct_label column, aligned to all PDB ATOM residues (including residues without CA), ordered by first (chain, resseq, icode) occurrence; -1 is ignored. Structure models can train/evaluate directly from pdbs/ plus struct_label without realigning sequences.
 
-- **SSP**：直接移植原 `splits_struct_native` 的 DSSP 直达标注（权威源）；主 `splits/` 全序列 label 的缺口放置存在约 8% train 行局部错帧瑕疵，不用于结构模型。原 `splits_struct_native/` 视图已退役归档至 `datasets/ss_prediction/output/splits_struct_native_deprecated/`。
-- **LBS / PPIS**：由结构接触提取流程原生对齐生成，等长行与全序列 label 100% 一致、`-1` 归零。
-- **工具**：`.skills/struct-label-alignment/`（`add_struct_label.py`，支持 `--dry-run`/`--overwrite`）。
+- **SSP:** import authoritative DSSP-native labels from the former splits_struct_native. Full-sequence main labels have local gap-placement offsets in ≈8% of training rows and are not used by structure models. Archive: datasets/ss_prediction/output/splits_struct_native_deprecated/.
+- **LBS/PPIS:** structure-contact extraction generates native alignment; equal-length rows match full-sequence labels 100%, with -1 mapped to zero.
+- **Tool:** .skills/struct-label-alignment/add_struct_label.py, supports --dry-run/--overwrite.
 
-**7.6 结构库（pdbs/）修复记录（2026-08）**
+**7.6 Structure library (pdbs/) repairs, 2026-08**
 
-对全部 10 个任务的结构库做全量扫描与修复，修复后全库重扫 0 残留问题、所有文件 Bio.PDB 可解析为单模型、无"结构长于序列"样本：
+Scan and repair structures across all ten tasks. Post-repair rescans find zero remaining issues; all files parse as single models in Bio.PDB; no structure-longer-than-sequence samples:
 
-| 任务 | 问题 | 规模 | 修复 |
+| Task | Issue | Scale | Repair |
 |------|------|------|------|
-| PPIS | pdb 列偏移（resname 后多一空格致 chain/resseq 右移，全库 Bio.PDB 不可读）+ 5 个链拼接截断 | 8,833 文件 | `ppis_prediction/output/scripts_archive/18_fix_pdb_column_layout.py`（坐标逐原子验证不变；已归档），提取脚本（现 `scripts/08_extract_representative_structures.py`）格式串已修补 |
-| LBS | NMR 多模型无 ENDMDL 分隔串联（同残基重复出现） | 549 文件 | `output/scripts_archive/26_fix_multimodel_pdbs.py` 重提取 model 1（已归档）；`scripts/07_extract_protein_chains.py` 打补丁（ENDMDL 即停 + cif 首模型 + 带引号原子名去引号） |
-| SSP | 多模型串联（23 个带 MODEL 记录 + 3 个无记录） | 26 文件 | `output/scripts_archive/fix_multimodel_pdbs.py`（已归档）；`scripts/05_extract_representative_chains.py` 改 `structure[0]` |
-| Fold / func / PDA | 同款 NMR 串联 | 4,076 / 1,940 / 203 文件 | 各任务 `output/scripts_archive/fix_multimodel_pdbs.py`（已归档），提取脚本同步补丁 |
-| PPI / LBA / kcat / pH | 扫描确认无问题 | — | kcat 7,057 个文件含 MODEL 记录但为单模型，无需处理 |
+| PPIS | PDB column shift: extra space after resname shifts chain/resseq, making the library unreadable in Bio.PDB; five truncated chain concatenations | 8,833 files | Archived ppis_prediction/output/scripts_archive/18_fix_pdb_column_layout.py; atomwise coordinates unchanged. Patch the format string in scripts/08_extract_representative_structures.py. |
+| LBS | NMR models concatenated without ENDMDL; duplicate residues | 549 files | Archived output/scripts_archive/26_fix_multimodel_pdbs.py re-extracts model 1. Patch scripts/07_extract_protein_chains.py: stop at ENDMDL, first CIF model, unquote atom names. |
+| SSP | Concatenated models: 23 with MODEL records, three without | 26 files | Archived output/scripts_archive/fix_multimodel_pdbs.py; extraction uses structure[0]. |
+| Fold /func /PDA | Same NMR concatenation | 4,076 /1,940 /203 files | Per-task archived output/scripts_archive/fix_multimodel_pdbs.py plus extraction-script patches. |
+| PPI /LBA /kcat /pH | No issues found | — | kcat has 7,057 files with MODEL records but only one model; no changes needed. |
 
-各任务修复前备份保存在对应 `output/backup_*/` 目录。
+Pre-repair backups are in each task output/backup_*/ directory.
 
 ---
 
-#### 8. protein-design-archive 额外测试集（2026-08 新增）
+#### 8. protein-design-archive additional test sets (added 2026-08)
 
-**状态**: ✅ 已完成
+**Status**: ✅ Complete
 
-**文件**: `datasets/protein-design-archive/splits/cath_design.csv`、`ec_design.csv`
+**File**: `datasets/protein-design-archive/splits/cath_design.csv`, `ec_design.csv`
 
-**文档**: `datasets/protein-design-archive/DATA_PROCESS.md`
+**Documentation**: `datasets/protein-design-archive/DATA_PROCESS.md`
 
-**内容**: 从 Protein Design Archive（1,879 个条目）构建的人工设计蛋白额外测试集，用于评估模型在"自然界不存在"的蛋白上的泛化。使用全部条目（不限纯人工设计），仅去除完全相同序列（保留微小序列差异），不做 95% 同一性聚类；pdbs/ 保存去重后的完整单链结构。
+Additional designed-protein test sets from 1,879 PDA entries evaluate generalization to proteins absent from nature. Use all entries, not only purely artificial designs; merge only exact sequences, retaining small differences without 95% identity clustering. pdbs/ stores complete deduplicated single-chain structures.
 
-| 测试集 | 样本数 | 对应任务 | 说明 |
+| Test set | Samples | Task | Notes |
 |--------|------:|----------|------|
-| `cath_design.csv` | 122 | fold_classification | 保留 CATH 可标注且落在现有 label 空间的设计蛋白，剔除与 fold train/val 重叠（id 或 ≥95% 序列同一性）的样本；OOD 列与主测试集同 schema |
-| `ec_design.csv` | 31 | func_prediction (EC) | EC 标注不做聚类内转移，保证每条样本标注准确可信 |
+| cath_design.csv | 122 | fold_classification | CATH-annotatable designs in the current label space, excluding fold train/val ID or ≥95% identity overlap; same OOD schema as main test. |
+| ec_design.csv | 31 | func_prediction (EC) | No EC transfer within clusters, preserving per-sample label provenance. |
 
-- 全部行 `Default=True`（设计蛋白不参与主数据集的正常划分，不适用 Default=False 的先验划分语义）；
-- OOD 标注（seq/TM/Orphan/NewEC/LongTailEC 等）以主数据集对应任务的 train/val 为参考集计算；
-- 后续可复用 pdbs/ 与流程构建其他任务的设计蛋白额外测试集。
+- All Default=True: designs do not undergo main-dataset splitting, so prior-reserved Default=False semantics do not apply.
+- Compute seq/TM/Orphan/NewEC/LongTailEC against the main task train/val references.
+- Reuse pdbs/ and the pipeline for additional design-test tasks later.
 
-**论文用途**: Supplementary / Figure（De novo 设计蛋白泛化评估）
-
----
-
-### 二、待完成的无需模型分析
-
-#### 6. 与现有Benchmark的对比表
-
-**状态**: ⏳ 待完成
-
-**内容**: 与CASP、CAFA、PDBbind、CATH、EnzyBase等现有基准的定量对比
-
-**维度**: 任务数、OOD场景、样本量、结构可用性、评估维度
-
-**论文用途**: Table 2（Related Work / Motivation）
-
-**工作量**: 需手动整理文献数据，无需代码
+**Paper use**: Supplementary / Figure(generalization to de novo designs)
 
 ---
 
-## 第二部分：需要训练模型的实验
+### II. Planned analyses without models
 
-### 一、基线模型评估（核心实验）
+#### 6. Comparison with existing benchmarks
 
-#### 1. ID（In-Distribution）性能基准
+**Status**: ⏳ Pending
 
-**目标**: 在train/val上训练，在test的ID子集上评估
+**Content**: Quantitative comparison with CASP, CAFA, PDBbind, CATH, EnzyBase, and other benchmarks
 
-**方法**: 筛选test集中所有OOD标记均为False的样本作为ID test
+**Dimensions**: Task counts, OOD scenarios, sample sizes, structure availability, and evaluation dimensions
 
-**模型**: ESM-2、ProstT5、AlphaFold2-derived等预训练模型+fine-tune
+**Paper use**: Table 2(Related Work / Motivation)
 
-**评估指标**: 任务相关（ACC、F1、MCC、MAE、Spearman等）
-
-**论文用途**: Table 4（ID性能基准）
-
-**计算需求**: 高（需GPU训练）
+**Effort**: Manual literature compilation; no code required
 
 ---
 
-#### 2. OOD性能衰减分析
+## Part II: Experiments requiring model training
 
-**目标**: 对比ID vs各OOD场景的性能下降
+### I. Baseline evaluation (core experiments)
 
-**方法**: 在同一模型上，分别评估test集的ID子集和每个OOD子集
+#### 1. In-distribution performance baseline
 
-**预期结果**: OOD场景性能显著低于ID，衰减幅度与OOD难度相关
+**Goal**: Train using train/val and evaluate on the ID test subset
 
-**论文用途**: Figure 4（OOD性能衰减图）, Table 5（各OOD场景性能对比）
+**Method**: Use test samples whose OOD flags are all False as the ID test subset
 
-**计算需求**: 高（基于实验1的模型，额外推理）
+**Models**: Fine-tune pretrained models such as ESM-2, ProstT5, and AlphaFold2-derived models
 
----
+**Metrics**: Task-specific: ACC, F1, MCC, MAE, Spearman, etc.
 
-#### 3. OOD阈值敏感性分析
+**Paper use**: Table 4(ID baseline)
 
-**目标**: 验证OOD阈值选择的合理性
-
-**方法**: 变化SeqRedundancy（40%, 30%, 20%）和TM-score（0.5, 0.3, 0.2）阈值，观察性能衰减曲线
-
-**论文用途**: Figure 6（阈值敏感性曲线）
-
-**计算需求**: 高（需多次重新划分OOD子集并评估）
-
-**注意**: 此分析需要模型在不同OOD子集上的性能输出
+**Compute**: High (GPU training)
 
 ---
 
-#### 4. OOD场景组合效应（难度分析）
+#### 2. OOD performance degradation
 
-**目标**: 分析多个OOD标记同时出现的样本的模型性能
+**Goal**: Compare ID performance with each OOD scenario
 
-**方法**: 基于模型输出，对比单一OOD vs组合OOD的性能衰减
+**Method**: Evaluate ID and each OOD test subset using the same model
 
-**论文用途**: Figure 7（组合OOD效应分析）
+**Expected result**: Lower performance under OOD, with degradation related to shift difficulty
 
-**计算需求**: 高（基于实验2的数据，额外分析）
+**Paper use**: Figure 4(OOD degradation plot), Table 5(per-scenario performance)
 
-**注意**: 此分析需要模型在组合OOD子集上的性能数据，属于模型依赖分析
-
----
-
-#### 5. 模型规模与OOD性能关系
-
-**目标**: 验证更大模型是否对OOD更鲁棒
-
-**方法**: 对比ESM-2 (8M/35M/150M/650M/3B)在不同OOD场景的表现
-
-**论文用途**: Figure 8（模型规模 vs OOD性能）
-
-**计算需求**: 极高（需训练/推理多个模型规模）
+**Compute**: High (additional inference using Experiment 1 models)
 
 ---
 
-### 二、OOD检测实验（基于模型输出）
+#### 3. OOD threshold sensitivity
 
-#### 6. 无监督OOD检测
+**Goal**: Assess the choice of OOD thresholds
 
-**目标**: 不依赖OOD标签，检测test样本是否为OOD
+**Method**: Vary SeqRedundancy (40%, 30%, 20%) and TM-score (0.5, 0.3, 0.2), then examine degradation curves
 
-**方法**:
-- 基于预训练模型的embedding密度（如MSP、Mahalanobis距离）
-- 基于重建误差（如VAE、AE）
-- 基于梯度/不确定性（如MC-Dropout）
+**Paper use**: Figure 6(threshold-sensitivity curves)
 
-**评估**: AUROC、AUPR、FPR@95%TPR
+**Compute**: High (repeated OOD subset selection and evaluation)
 
-**论文用途**: Figure 5（OOD检测ROC曲线）, Table 6（检测性能对比）
-
-**计算需求**: 中高（需训练检测器或提取embedding）
-
-**注意**: 此实验需要模型输出的embedding或概率分布，属于模型依赖分析
+**Note**: Requires model performance on different OOD subsets
 
 ---
 
-### 三、OOD缓解策略实验（基于模型训练）
+#### 4. Combined OOD scenarios (difficulty analysis)
 
-#### 7. 数据增强与重采样
+**Goal**: Analyze model performance on samples carrying multiple OOD flags
 
-**目标**: 缓解OOD性能衰减
+**Method**: Compare single versus combined OOD degradation using model outputs
 
-**方法**:
-- 对长尾标签进行过采样
-- 对ExtremeLength/IDR样本进行数据增强
-- 基于序列相似度的训练集扩展
+**Paper use**: Figure 7(combined OOD analysis)
 
-**评估**: ID性能保持 + OOD性能提升
+**Compute**: High (additional analysis of Experiment 2 outputs)
 
-**论文用途**: Table 7（缓解策略效果对比）
-
-**计算需求**: 高
+**Note**: Requires performance on combined OOD subsets; model-dependent analysis
 
 ---
 
-#### 8. 域自适应/迁移学习
+#### 5. Model scale and OOD performance
 
-**目标**: 提升模型对OOD域的泛化能力
+**Goal**: Test whether larger models are more robust to OOD
 
-**方法**:
-- DANN（Domain-Adversarial Neural Network）
-- CORAL（特征对齐）
-- Mixup/CutMix等数据混合策略
+**Method**: Compare ESM-2 scales (8M/35M/150M/650M/3B) across OOD scenarios
 
-**评估**: 同实验5
+**Paper use**: Figure 8(model scale versus OOD performance)
 
-**论文用途**: 与实验5对比
-
-**计算需求**: 高
+**Compute**: Very high (training/inference at multiple model scales)
 
 ---
 
-#### 9. 集成方法与不确定性量化
+### II. OOD detection using model outputs
 
-**目标**: 提升模型对OOD样本的识别能力
+#### 6. Unsupervised OOD detection
 
-**方法**:
-- Deep Ensemble（多模型集成）
-- SWA（Stochastic Weight Averaging）
+**Goal**: Detect OOD test samples without OOD-label supervision
+
+**Method**:
+- Use pretrained embeddings/scores, e.g. MSP or Mahalanobis distance
+- Reconstruction errors, e.g. VAE or AE
+- Gradient/uncertainty methods, e.g. MC-Dropout
+
+**Evaluation**: AUROC, AUPR, FPR@95%TPR
+
+**Paper use**: Figure 5(OOD detection ROC), Table 6(detection comparison)
+
+**Compute**: Medium-high (train detectors or extract embeddings)
+
+**Note**: Requires model embeddings or probability distributions; model-dependent
+
+---
+
+### III. OOD mitigation through model training
+
+#### 7. Data augmentation and resampling
+
+**Goal**: Mitigate OOD performance degradation
+
+**Method**:
+- Oversample long-tail labels
+- Augment ExtremeLength/IDR samples
+- Expand training data using sequence similarity
+
+**Evaluation**: Preserve ID performance and improve OOD performance
+
+**Paper use**: Table 7(mitigation strategy comparison)
+
+**Compute**: High
+
+---
+
+#### 8. Domain adaptation / transfer learning
+
+**Goal**: Improve generalization to OOD domains
+
+**Method**:
+- DANN (Domain-Adversarial Neural Network)
+- CORAL(feature alignment)
+- Data mixing such as Mixup/CutMix
+
+**Evaluation**: Same as Experiment 5
+
+**Paper use**: Compare with Experiment 5
+
+**Compute**: High
+
+---
+
+#### 9. Ensembles and uncertainty quantification
+
+**Goal**: Improve recognition of OOD samples
+
+**Method**:
+- Deep Ensemble(multiple-model ensemble)
+- SWA (Stochastic Weight Averaging)
 - Evidential Deep Learning
 
-**评估**: ID性能 + OOD检测AUROC + 校准性（ECE）
+**Evaluation**: ID performance + OOD detection AUROC + calibration (ECE)
 
-**论文用途**: Table 8（集成方法对比）
+**Paper use**: Table 8(ensemble comparison)
 
-**计算需求**: 极高（需训练多个模型）
+**Compute**: Very high (multiple model training runs)
 
 ---
 
-## 论文图表规划
+## Planned paper figures and tables
 
-### 无需模型的图表（可直接生成）
+### Model-free figures/tables (ready to generate)
 
-| 图表 | 内容 | 来源 |
+| Figure/table | Content | Source |
 |------|------|------|
-| Table 1 | 数据集规模统计 | 结构序列统计 |
-| Figure 1 | OOD覆盖热力图 | OOD覆盖度矩阵 |
-| Figure 2 | OOD重叠矩阵 | OOD重叠分析 |
-| Figure 3 | 标签长尾/Zipf曲线 | 标签分布分析 |
-| Table 2 | Benchmark对比 | 待完成（文献整理） |
+| Table 1 | Dataset scale statistics | Structure/sequence statistics |
+| Figure 1 | OOD coverage heatmap | OOD coverage matrix |
+| Figure 2 | OOD overlap matrix | OOD overlap analysis |
+| Figure 3 | Label long-tail/Zipf curves | Label distribution analysis |
+| Table 2 | Benchmark comparison | Pending(literature compilation) |
 
-### 需要模型的图表（实验后生成）
+### Model-dependent figures/tables (after experiments)
 
-| 图表 | 内容 | 来源 |
+| Figure/table | Content | Source |
 |------|------|------|
-| Table 3 | ID性能基准 | 实验1 |
-| Figure 4 | OOD性能衰减 | 实验2 |
-| Figure 5 | OOD检测ROC | 实验3 |
-| Table 4 | OOD检测对比 | 实验3-4 |
-| Table 5 | 缓解策略对比 | 实验5-7 |
-| Figure 6 | 阈值敏感性 | 实验8 |
-| Figure 7 | 组合OOD效应 | 实验9 |
-| Figure 8 | 模型规模vsOOD | 实验10 |
+| Table 3 | ID baseline | Experiment 1 |
+| Figure 4 | OOD degradation | Experiment 2 |
+| Figure 5 | OOD detection ROC | Experiment 3 |
+| Table 4 | OOD detection comparison | Experiment 3-4 |
+| Table 5 | Mitigation comparison | Experiment 5-7 |
+| Figure 6 | Threshold sensitivity | Experiment 8 |
+| Figure 7 | Combined OOD effects | Experiment 9 |
+| Figure 8 | Model scale versus OOD | Experiment 10 |
 
 ---
 
-### 最小可行论文（MVP）
+### Minimum viable paper (MVP)
 
-- **必须完成**: 阶段一全部 + 实验1-4
-- **可选增强**: 实验5（缓解策略）+ 实验6（敏感性）+ 实验7-9（组合效应）
-- **理想完整**: 全部实验
+- **Required**: All Stage 1 work +Experiments 1–4
+- **Optional extensions**: Experiment 5 (mitigation) +6 (sensitivity) +7–9 (combined effects)
+- **Full version**: All experiments
 
 ---
 
-## 文件位置
+## File locations
 
-分析脚本与中间结果组织如下（相对仓库根 `POOR/`）：
+Analysis scripts and intermediate outputs relative to the POOR/ root:
 
 ```
 analysis/
-├── scripts/                                  # 分析脚本（仅保留数据统计/论文作图工具）
-│   ├── dataset_scale_stats.py                # §1 数据集规模统计（2026-08 新建）
-│   ├── ood_coverage_matrix.py                # §2 OOD 覆盖度矩阵 + §3 重叠度（2026-08 更新场景）
-│   ├── label_distribution.py                 # §4 标签长尾分布（2026-08 新建）
-│   ├── compute_structure_source_stats.py     # §5 结构来源占比（2026-08 修正 ROOT）
-│   ├── plot_figure2_ood_orthogonality.py     # Figure 2 绘图
-│   └── plot_ood_jaccard_heatmaps.py          # OOD Jaccard 热力图绘图
-└── output/                                   # 分析中间结果
-    ├── dataset_scale_stats.json              # §1（2026-08-28）
-    ├── ood_coverage_matrix.csv / .md         # §2（2026-08-28）
-    ├── ood_overlap_matrix.csv                # §3（2026-08-28）
-    ├── label_distribution.json               # §4（2026-08-28）
-    ├── structure_source_stats.json           # §5（2026-08-28）
-    ├── aa_seq_structure_consistency.json     # §7.1（2026-07 快照）
-    ├── residue_level_consistency.json        # §7.2（2026-07 快照）
-    ├── sequence_legality.json                # §7.3（2026-08-28 重算）
-    ├── format_consistency.json               # §7.4（2026-07 快照）
-    └── ood_jaccard_heatmaps/                 # Figure 2 图片
+├── scripts/                                  # Analysis scripts: statistics and paper figures only
+│   ├── dataset_scale_stats.py                # §1 Dataset scale statistics (added 2026-08)
+│   ├── ood_coverage_matrix.py                # §2 OOD coverage matrix +§3 overlap (scenarios updated 2026-08)
+│   ├── label_distribution.py                 # §4 Label long-tail distribution (added 2026-08)
+│   ├── compute_structure_source_stats.py     # §5 Structure-source coverage (ROOT fixed 2026-08)
+│   ├── plot_figure2_ood_orthogonality.py     # Figure 2 Plotting
+│   └── plot_ood_jaccard_heatmaps.py          # OOD Jaccard heatmaps
+└── output/                                   # Intermediate analysis outputs
+    ├── dataset_scale_stats.json              # §1 (2026-08-28)
+    ├── ood_coverage_matrix.csv / .md         # §2 (2026-08-28)
+    ├── ood_overlap_matrix.csv                # §3 (2026-08-28)
+    ├── label_distribution.json               # §4 (2026-08-28)
+    ├── structure_source_stats.json           # §5 (2026-08-28)
+    ├── aa_seq_structure_consistency.json     # §7.1(2026-07 snapshot)
+    ├── residue_level_consistency.json        # §7.2(2026-07 snapshot)
+    ├── sequence_legality.json                # §7.3(recomputed 2026-08-28)
+    ├── format_consistency.json               # §7.4(2026-07 snapshot)
+    └── ood_jaccard_heatmaps/                 # Figure 2 Images
 ```
 
-> 注（2026-08-28）：任务特定的一次性脚本已下沉至各任务 `scripts/` 后，各任务 scripts 已于同日完成全面整理：全部流程脚本按执行顺序重编号（`NN_*.py`），一次性补丁脚本（`fix_multimodel_pdbs.py`、`18_fix_pdb_column_layout.py`、`fix_lbs_aaseq.py`、`build_ss_struct_native.py`、`ss_struct_alignment_probe.py`、`patch_struct_label_from_native.py` 等）已归档至各任务 `output/scripts_archive/`（修复均已落入数据、根因已修入正常流程脚本），`crop_ppis_structures.py` 现为 `ppis_prediction/scripts/12_crop_ppis_structures.py`；各任务处理流程以对应 `DATA_PROCESS.md`（四阶段结构）为准。
+> Note (2026-08-28): after moving task-specific one-off scripts into task directories, all workflows were renumbered NN_*.py in execution order. One-off fixes (fix_multimodel_pdbs.py, 18_fix_pdb_column_layout.py, fix_lbs_aaseq.py, build_ss_struct_native.py, ss_struct_alignment_probe.py, patch_struct_label_from_native.py, etc.) are archived in per-task output/scripts_archive/. Repairs are applied to data and root causes patched in normal extraction scripts. crop_ppis_structures.py is now ppis_prediction/scripts/12_crop_ppis_structures.py. Each four-stage DATA_PROCESS.md is authoritative.
 
-可复用的数据处理流程已沉淀为项目 skill（`.skills/`）：
+Reusable processing workflows are provided as project skills (.skills/):
 
 ```
 .skills/
-├── cath-ted-domain-annotation/    # CATH+TED 域标注（topology/superfamily），供 FoldHoldout/SuperfamilyHoldout OOD 判定
-├── ec-function-ood-annotation/    # EC 标注 + NewEC / LongTailEC OOD 统一口径（all-not-in，L3/L4，阈值 5/10）
-├── homology-ood-annotation/       # 序列同源性 / Orphan / TM-score OOD 标注
-├── ood-annotation-toolkit/        # OOD 标注通用工具（Default/InD/NaN 语义）
-├── pood-benchmark-process/        # 数据集构建总流程
-└── struct-label-alignment/        # 残基级任务 struct_label 生成与校验
+├── cath-ted-domain-annotation/    # CATH+TED domain annotations for topology/superfamily holdouts
+├── ec-function-ood-annotation/    # EC annotation and canonical NewEC/LongTailEC (all-not-in, L3/L4, thresholds 5/10)
+├── homology-ood-annotation/       # Sequence homology / Orphan / TM-score OOD annotation
+├── ood-annotation-toolkit/        # Generic OOD tools with Default/InD/NaN semantics
+├── pood-benchmark-process/        # Overall dataset construction workflow
+└── struct-label-alignment/        # Residue-task struct_label generation and validation
 ```
 
-> 注（2026-09-01）：`analysis/scripts/` 只保留数据统计/论文作图工具（上表 6 个）；QA 审计脚本（`comprehensive_audit.py`、`struct_audit.py`、`audit_foldseek_easysearch.py`、`verify_aa_seq_vs_structure.py`、`residue_level_consistency.py`、`sequence_legality.py`）与一次性调研脚本（`combinatorial_ec_feasibility.py`）已删除，其产出（`output/comprehensive_audit_20260830/` 等）保留备查。`ppis_prediction/scripts/12_crop_ppis_structures.py` 对 `verify_aa_seq_vs_structure.py` 的 import 已改为内联 Biopython 映射。
+> Note (2026-09-01): analysis/scripts/ retains only the six statistics/plotting tools listed above. QA scripts (comprehensive_audit.py, struct_audit.py, audit_foldseek_easysearch.py, verify_aa_seq_vs_structure.py, residue_level_consistency.py, sequence_legality.py) and one-off combinatorial_ec_feasibility.py were removed; outputs such as output/comprehensive_audit_20260830/ remain for inspection. ppis_prediction/scripts/12_crop_ppis_structures.py now inlines Biopython mappings instead of importing verify_aa_seq_vs_structure.py.
 
-> **注意**：仓库根 `.gitignore` 忽略 `pdbs/`、`splits/`、`output/`、`check/`，因此 `analysis/output/` 及各任务的 `output/` **不纳入版本控制**；`analysis/scripts/` 与 `analysis/benchmark_analysis.md` 已入库。
+> **Note:** root .gitignore excludes pdbs/, splits/, output/, and check/. Thus analysis/output/ and per-task output/ are **not version controlled**; analysis/scripts/ and analysis/benchmark_analysis.md are tracked.

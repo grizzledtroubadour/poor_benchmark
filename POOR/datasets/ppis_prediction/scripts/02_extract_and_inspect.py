@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-解压 DIPS-Plus 归档并探查目录结构。
+Extract DIPS-Plus archives and inspect their directory layout.
 
-用法：
+Usage:
     python scripts/extract_and_inspect.py [--core-only] [--dry-run]
 
---core-only：仅解压 final_raw_dips.tar.gz 的核心内容（pair 文件、划分列表、元数据）。
---dry-run：仅列出归档内容，不解压。
+--core-only: extract only core contents (pairs, split lists, metadata) from final_raw_dips.tar.gz.
+--dry-run: list archive contents without extracting.
 """
 
 import argparse
@@ -46,7 +46,7 @@ def run_cmd(cmd, cwd=None):
 
 
 def list_archive(archive_path):
-    """列出 tar.gz 归档内容。"""
+    """List tar.gz archive contents."""
     if not archive_path.exists():
         logger.warning("Archive not found: %s", archive_path)
         return []
@@ -56,7 +56,7 @@ def list_archive(archive_path):
 
 
 def extract_archive(archive_path, dest_dir, patterns=None):
-    """解压 tar.gz 归档，可选按 pattern 过滤。"""
+    """Extract a tar.gz archive, optionally filtering by pattern."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     cmd = ["tar", "-xzf", str(archive_path), "-C", str(dest_dir)]
     if patterns:
@@ -66,7 +66,7 @@ def extract_archive(archive_path, dest_dir, patterns=None):
 
 
 def build_directory_tree(paths):
-    """从 tar 列表生成树形结构摘要。"""
+    """Build a directory-tree summary from an archive listing."""
     tree = {}
     for p in paths:
         parts = p.split("/")
@@ -81,7 +81,7 @@ def build_directory_tree(paths):
 
 
 def tree_summary(tree, prefix=""):
-    """将树形结构转为可打印字符串。"""
+    """Convert a tree to a printable string."""
     lines = []
     keys = sorted(tree.keys())
     for i, key in enumerate(keys):
@@ -94,16 +94,16 @@ def tree_summary(tree, prefix=""):
 
 def main():
     parser = argparse.ArgumentParser(description="Extract and inspect DIPS-Plus archives")
-    parser.add_argument("--core-only", action="store_true", help="仅解压核心归档")
-    parser.add_argument("--dry-run", action="store_true", help="仅列出归档内容")
-    parser.add_argument("--patterns", nargs="+", help="仅解压匹配的文件模式（如 *.txt）")
+    parser.add_argument("--core-only", action="store_true", help="Extract core archive only")
+    parser.add_argument("--dry-run", action="store_true", help="List archive contents only")
+    parser.add_argument("--patterns", nargs="+", help="Extract only matching file patterns (e.g. *.txt)")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     summaries = {}
 
-    # 核心归档
+    # Core archive
     logger.info("Inspecting core archive: %s", CORE_ARCHIVE)
     core_paths = list_archive(CORE_ARCHIVE)
     summaries["core"] = {
@@ -122,7 +122,7 @@ def main():
         patterns = args.patterns if args.patterns else None
         extract_archive(CORE_ARCHIVE, DATA_DIR, patterns=patterns)
 
-    # MSA 归档（可选）
+    # Optional MSA archive
     if not args.core_only and MSA_ARCHIVE.exists():
         logger.info("Inspecting MSA archive: %s", MSA_ARCHIVE)
         msa_paths = list_archive(MSA_ARCHIVE)

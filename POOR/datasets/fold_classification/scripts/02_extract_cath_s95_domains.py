@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-CATH S95 结构域全量提取脚本。
-从 PDB/mmCIF 源文件中提取 62,915 个 S95 代表域的结构。
-输出目录: fold_classification/output/cath_s95_domains/
+Extract all CATH S95 domain structures.
+Extract 62,915 representative S95 domains from source PDB/mmCIF files.
+Output directory: fold_classification/output/cath_s95_domains/
 """
 
 import gzip
@@ -20,9 +20,9 @@ from multiprocessing import cpu_count
 from Bio.PDB import MMCIFParser
 from tqdm import tqdm
 
-# ── 路径配置 ──────────────────────────────────────────────────────────
+# ── Path configuration ──
 TASK_DIR = Path(__file__).resolve().parents[1]  # datasets/fold_classification
-ROOT = Path(__file__).resolve().parents[3]      # 仓库根（POOR）
+ROOT = Path(__file__).resolve().parents[3]      # Repository root (POOR)
 OUTPUT_DIR = TASK_DIR / "output" / "cath_s95_domains"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -47,7 +47,7 @@ THREE_TO_ONE = {
 }
 
 
-# ── 日志 ──────────────────────────────────────────────────────────────
+# ── Logging ──
 
 def log(msg):
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -57,10 +57,10 @@ def log(msg):
         f.write(line + "\n")
 
 
-# ── 数据加载 ──────────────────────────────────────────────────────────
+# ── Data loading ──
 
 def build_pdb_index():
-    """预建 {pdb_id_lower: Path} 索引"""
+    """Prebuild a {pdb_id_lower: Path} index."""
     index = {}
     for f in DATA_PDB.iterdir():
         if f.is_file() and f.suffix == '.gz':
@@ -71,7 +71,7 @@ def build_pdb_index():
 
 
 def parse_cath_boundaries(boundaries_file: Path) -> dict:
-    """解析 cath-domain-boundaries.txt (CDF Format 2.0)"""
+    """Parse cath-domain-boundaries.txt (CDF Format 2.0)."""
     domain_map = {}
     with open(boundaries_file) as f:
         for line in f:
@@ -81,15 +81,15 @@ def parse_cath_boundaries(boundaries_file: Path) -> dict:
             tokens = line.split()
             if len(tokens) < 4:
                 continue
-            
+
             chain_name = tokens[0]
             n_domains = int(tokens[1][1:])
             n_fragments = int(tokens[2][1:])
             idx = 3
-            
+
             pdb_id = chain_name[:4]
             chain_char = chain_name[4] if len(chain_name) > 4 else '0'
-            
+
             for dom_i in range(1, n_domains + 1):
                 n_segments = int(tokens[idx])
                 idx += 1
@@ -101,7 +101,7 @@ def parse_cath_boundaries(boundaries_file: Path) -> dict:
                     c_end = tokens[idx+3]
                     end = tokens[idx+4]
                     insert_end = tokens[idx+5]
-                    
+
                     try:
                         start_num = int(start)
                     except ValueError:
@@ -110,7 +110,7 @@ def parse_cath_boundaries(boundaries_file: Path) -> dict:
                         end_num = int(end)
                     except ValueError:
                         end_num = None
-                    
+
                     segments.append({
                         'chain': c_start if c_start != '0' else chain_char,
                         'start': start_num,
@@ -119,20 +119,20 @@ def parse_cath_boundaries(boundaries_file: Path) -> dict:
                         'end_icode': insert_end if insert_end != '-' else ' ',
                     })
                     idx += 6
-                
+
                 domain_id = f"{pdb_id}{chain_char}{dom_i:02d}"
                 domain_map[domain_id] = (chain_char, segments)
-            
+
             for _ in range(n_fragments):
                 idx += 6
                 if idx < len(tokens) and tokens[idx].startswith('('):
                     idx += 1
-    
+
     return domain_map
 
 
 def load_s95_domain_list(list_file: Path) -> list:
-    """加载 S95 列表"""
+    """Load the S95 list."""
     domains = []
     with open(list_file) as f:
         for line in f:
@@ -162,7 +162,7 @@ def load_s95_domain_list(list_file: Path) -> list:
 
 
 def load_fasta_sequences(fasta_file: Path) -> dict:
-    """加载 FASTA 序列"""
+    """Load FASTA sequences."""
     seqs = {}
     current_id = None
     current_seq = []
@@ -183,10 +183,10 @@ def load_fasta_sequences(fasta_file: Path) -> dict:
     return seqs
 
 
-# ── 结构域提取核心 ────────────────────────────────────────────────────
+# ── Domain extraction core ──
 
 def parse_resnum_from_pdb_line(line: str) -> tuple:
-    """从 PDB ATOM 行解析残基编号和 insertion code"""
+    """Parse residue number and insertion code from a PDB ATOM record."""
     resnum_str = line[22:27]
     try:
         resnum = int(resnum_str)
@@ -197,13 +197,13 @@ def parse_resnum_from_pdb_line(line: str) -> tuple:
 
 
 def res_in_segments(resnum, icode, segments):
-    """检查残基是否在任何 segment 范围内"""
+    """Check whether a residue belongs to any segment range."""
     for seg in segments:
         start = seg['start']
         end = seg['end']
         start_icode = seg.get('start_icode', ' ')
         end_icode = seg.get('end_icode', ' ')
-        
+
         if start is not None and end is not None:
             if start < resnum < end:
                 return True
@@ -225,13 +225,13 @@ def res_in_segments(resnum, icode, segments):
 
 
 def extract_from_pdb_gz(pdb_path: Path, chain_target: str, segments: list, whole_chain: bool) -> list:
-    """从 gzipped PDB 提取 ATOM 行"""
+    """Extract ATOM records from gzipped PDB."""
     import subprocess
     lines_out = []
     target_chains = [chain_target]
     if chain_target == '0':
         target_chains = [' ', 'A']
-    
+
     proc = subprocess.Popen(['zcat', str(pdb_path)], stdout=subprocess.PIPE, text=True, errors='replace')
     try:
         for line in proc.stdout:
@@ -256,25 +256,25 @@ def extract_from_pdb_gz(pdb_path: Path, chain_target: str, segments: list, whole
     finally:
         proc.stdout.close()
         proc.wait()
-    
+
     return lines_out
 
 
 def extract_from_cif_gz(cif_path: Path, chain_target: str, segments: list, whole_chain: bool) -> list:
-    """从 gzipped mmCIF 提取，输出 PDB 格式 ATOM 行"""
+    """Extract from gzipped mmCIF and emit PDB-format ATOM records."""
     try:
         with gzip.open(cif_path, 'rt') as f:
             structure = CIF_PARSER.get_structure('tmp', f)
     except Exception:
         return []
-    
+
     target_chains = [chain_target]
     if chain_target == '0':
         target_chains = [' ', 'A']
-    
+
     lines_out = []
     atom_serial = 1
-    
+
     for model in structure:
         for chain in model:
             if chain.id not in target_chains:
@@ -283,10 +283,10 @@ def extract_from_cif_gz(cif_path: Path, chain_target: str, segments: list, whole
                 res_id = residue.get_id()
                 res_seq = res_id[1]
                 res_icode = res_id[2] if res_id[2] not in ('', ' ') else ' '
-                
+
                 if not whole_chain and not res_in_segments(res_seq, res_icode, segments):
                     continue
-                
+
                 res_name = residue.resname
                 for atom in residue:
                     x, y, z = atom.coord
@@ -305,12 +305,12 @@ def extract_from_cif_gz(cif_path: Path, chain_target: str, segments: list, whole
                     )
                     lines_out.append(line)
                     atom_serial += 1
-    
+
     return lines_out
 
 
 def pdb_lines_to_sequence(atom_lines: list) -> str:
-    """从 PDB ATOM 行提取氨基酸序列"""
+    """Extract amino-acid sequence from PDB ATOM records."""
     seen = set()
     seq = []
     for line in atom_lines:
@@ -326,7 +326,7 @@ def pdb_lines_to_sequence(atom_lines: list) -> str:
     return ''.join(seq)
 
 
-# ── 汇总表生成（原 fix_summary.py 逻辑，已融入本脚本）─────────────────────
+# ── Summary generation, incorporating former fix_summary.py logic ──
 
 SUMMARY_FIELDS = [
     'domain_id', 'pdb_id', 'chain', 'dom_num', 'type',
@@ -336,7 +336,7 @@ SUMMARY_FIELDS = [
 
 
 def count_residues_and_atoms(pdb_path: Path) -> tuple:
-    """读取 PDB 文件，统计残基数和原子数"""
+    """Read a PDB and count residues and atoms."""
     seen_residues = set()
     n_atoms = 0
     with open(pdb_path) as f:
@@ -352,21 +352,21 @@ def count_residues_and_atoms(pdb_path: Path) -> tuple:
 
 
 def regenerate_summary():
-    """扫描提取产物，重新生成完整汇总表 output/cath_s95_summary.csv。
+    """Scan extracted files and rebuild the complete output/cath_s95_summary.csv.
 
-    历史缺陷：早期版本在并行提取循环内按 checkpoint 追加写 CSV
-    （`processed % 500 == 0` 判定几乎不命中，仅保存了部分批次）。
-    现统一在提取结束后（或全部命中 checkpoint 时）从产物文件全量重建，
-    直接产出完整汇总表。
+    Historical bug: earlier code appended CSV checkpoints inside the parallel extraction loop;
+    processed %500 ==0 rarely triggered, saving only some batches.
+    Now rebuild from all output files after extraction, or when all domains hit checkpoints,
+    producing a complete summary directly.
     """
     domains_dir = OUTPUT_DIR
     if not domains_dir.is_dir() or not any(domains_dir.glob('*.pdb')):
-        # 提取产物已迁移为最终结构库 pdbs/（当前仓库状态）
+        # Extracted files have moved to the final pdbs/ structure library.
         domains_dir = TASK_DIR / "pdbs"
 
     meta = {d['domain_id']: d for d in load_s95_domain_list(CATH_DOMAIN_LIST_S95)}
     pdb_files = sorted(domains_dir.glob('*.pdb'))
-    print(f"\n[*] 重新生成汇总表: 扫描 {len(pdb_files)} 个 PDB 文件 ({domains_dir})")
+    print(f"\n[*] Rebuilding summary: scanning {len(pdb_files)} PDB files ({domains_dir})")
 
     summary_csv = TASK_DIR / "output" / "cath_s95_summary.csv"
     n_written = 0
@@ -393,22 +393,22 @@ def regenerate_summary():
                 'resolution': m['resolution'],
             })
             n_written += 1
-    print(f"    汇总表已保存: {summary_csv} ({n_written} 行)")
+    print(f"    Summary saved: {summary_csv} ({n_written} rows)")
 
 
-# ── Worker 函数 ───────────────────────────────────────────────────────
+# ── Worker functions ──
 
 def process_batch(batch_data):
-    """处理一批域，返回结果列表"""
+    """Process one domain batch and return results."""
     domain_batch, boundaries, pdb_index = batch_data
     results = []
-    
+
     for d in domain_batch:
         domain_id = d['domain_id']
         pdb_id = d['pdb_id']
         chain = d['chain']
         dom_num = d['dom_num']
-        
+
         result = {
             'domain_id': domain_id,
             'pdb_id': pdb_id,
@@ -425,17 +425,17 @@ def process_batch(batch_data):
             'seq_extracted': '',
             'error': '',
         }
-        
+
         pdb_file = pdb_index.get(pdb_id)
         if pdb_file is None:
             result['status'] = 'missing_pdb'
             result['error'] = f'PDB file not found for {pdb_id}'
             results.append(result)
             continue
-        
+
         is_pdb = '.pdb' in pdb_file.name
         whole_chain = (dom_num == '00')
-        
+
         if whole_chain:
             if is_pdb:
                 atom_lines = extract_from_pdb_gz(pdb_file, chain, [], True)
@@ -453,13 +453,13 @@ def process_batch(batch_data):
                 result['error'] = f'No PDB boundary for {domain_id}'
                 results.append(result)
                 continue
-        
+
         if not atom_lines:
             result['status'] = 'empty'
             result['error'] = 'No atoms extracted'
             results.append(result)
             continue
-        
+
         out_pdb = OUTPUT_DIR / f"{domain_id}.pdb"
         try:
             with open(out_pdb, 'w') as f:
@@ -469,64 +469,64 @@ def process_batch(batch_data):
             result['error'] = str(e)
             results.append(result)
             continue
-        
+
         result['n_atoms'] = len(atom_lines)
         result['seq_extracted'] = pdb_lines_to_sequence(atom_lines)
         result['n_residues'] = len(result['seq_extracted'])
         result['status'] = 'success'
         results.append(result)
-    
+
     return results
 
 
-# ── 主流程 ────────────────────────────────────────────────────────────
+# ── Main workflow ──
 
 def main():
     print("=" * 70)
-    print("CATH S95 结构域全量提取")
+    print("Full CATH S95 domain extraction")
     print("=" * 70)
-    
-    # 加载数据
-    print("\n[1/5] 加载 S95 域列表...")
+
+    # Load data.
+    print("\n[1/5] Loading S95 domain list...")
     s95_domains = load_s95_domain_list(CATH_DOMAIN_LIST_S95)
-    print(f"      S95 域总数: {len(s95_domains)}")
-    
-    print("\n[2/5] 加载结构域边界...")
+    print(f"      Total S95 domains: {len(s95_domains)}")
+
+    print("\n[2/5] Loading domain boundaries...")
     boundaries = parse_cath_boundaries(CATH_BOUNDARIES)
-    print(f"      PDB 边界域数: {len(boundaries)}")
-    
-    print("\n[3/5] 构建 PDB 文件索引...")
+    print(f"      Domains with PDB boundaries: {len(boundaries)}")
+
+    print("\n[3/5] Building PDB file index...")
     pdb_index = build_pdb_index()
-    print(f"      本地 PDB 文件数: {len(pdb_index)}")
-    
-    # 检查断点续传
+    print(f"      Local PDB files: {len(pdb_index)}")
+
+    # Check resume state.
     completed_ids = set()
     if CHECKPOINT_FILE.exists():
-        print(f"\n[*] 发现检查点文件，加载已完成列表...")
+        print(f"\n[*] Checkpoint found; loading completed IDs...")
         try:
             with open(CHECKPOINT_FILE, 'rb') as f:
                 completed_ids = pickle.load(f)
-            print(f"    已完成: {len(completed_ids)}")
+            print(f"    Completed: {len(completed_ids)}")
         except Exception:
             completed_ids = set()
-    
-    # 筛选待处理域
+
+    # Select remaining domains.
     todo_domains = [d for d in s95_domains if d['domain_id'] not in completed_ids]
-    print(f"\n[4/5] 待处理域: {len(todo_domains)} / {len(s95_domains)}")
+    print(f"\n[4/5] Pending domains: {len(todo_domains)} / {len(s95_domains)}")
 
     if len(todo_domains) == 0:
-        print("\n所有域已处理完成！")
+        print("\nAll domains have been processed!")
         regenerate_summary()
         return
-    
-    # 分 batch
+
+    # Divide into batches.
     n_workers = max(1, cpu_count() - 1)
     batch_size = max(1, len(todo_domains) // (n_workers * 4))
     batches = []
     for i in range(0, len(todo_domains), batch_size):
         batches.append((todo_domains[i:i+batch_size], boundaries, pdb_index))
-    
-    print(f"\n[5/5] 启动并行提取: {n_workers} workers, {len(batches)} batches")
+
+    print(f"\n[5/5] Starting parallel extraction: {n_workers} workers, {len(batches)} batches")
 
     all_results = []
     processed = len(completed_ids)
@@ -534,42 +534,42 @@ def main():
     with ProcessPoolExecutor(max_workers=n_workers) as executor:
         futures = {executor.submit(process_batch, batch): i for i, batch in enumerate(batches)}
 
-        with tqdm(total=len(todo_domains), desc="提取", initial=0) as pbar:
+        with tqdm(total=len(todo_domains), desc="Extraction", initial=0) as pbar:
             for future in as_completed(futures):
                 batch_results = future.result()
                 all_results.extend(batch_results)
                 processed += len(batch_results)
                 pbar.update(len(batch_results))
 
-                # 保存进度
+                # Save progress.
                 if processed % 500 == 0:
                     new_completed = completed_ids | {r['domain_id'] for r in all_results if r['status'] == 'success'}
                     with open(CHECKPOINT_FILE, 'wb') as f:
                         pickle.dump(new_completed, f)
-    
-    # 最终保存
+
+    # Final save
     final_completed = completed_ids | {r['domain_id'] for r in all_results if r['status'] == 'success'}
     with open(CHECKPOINT_FILE, 'wb') as f:
         pickle.dump(final_completed, f)
-    
-    # 统计
+
+    # Statistics
     print("\n" + "=" * 70)
-    print("提取完成")
+    print("Extraction complete")
     print("=" * 70)
-    
+
     status_counts = defaultdict(int)
     for r in all_results:
         status_counts[r['status']] += 1
-    
-    print(f"\n状态分布:")
+
+    print(f"\nStatus distribution:")
     for status, count in sorted(status_counts.items(), key=lambda x: -x[1]):
         print(f"  {status}: {count}")
-    
-    success_count = status_counts.get('success', 0)
-    print(f"\n成功提取: {len(final_completed)} / {len(s95_domains)} ({len(final_completed)/len(s95_domains)*100:.1f}%)")
-    print(f"输出目录: {OUTPUT_DIR}")
 
-    # 提取结束后从产物文件全量重建汇总表（替代有缺陷的增量追加写）
+    success_count = status_counts.get('success', 0)
+    print(f"\nSuccessfully extracted: {len(final_completed)} / {len(s95_domains)} ({len(final_completed)/len(s95_domains)*100:.1f}%)")
+    print(f"Output directory: {OUTPUT_DIR}")
+
+    # Rebuild the entire summary from output files after extraction, replacing broken incremental writes.
     regenerate_summary()
 
 

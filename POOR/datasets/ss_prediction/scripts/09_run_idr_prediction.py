@@ -3,9 +3,9 @@
 Run metapredict v3 IDR prediction on SSP representative sequences.
 Computes IDR_ratio and marks OOD-IDR (IDR_ratio > 0.3).
 
-口径说明：与 .skills/ood-annotation-toolkit/scripts/idr_ood.py 的
-`--mode residue-ratio --threshold 0.3 --clean strip` 口径一致
-（residue-ratio、阈值 0.3、预测前剔除非标准氨基酸）。
+Aligned with .skills/ood-annotation-toolkit/scripts/idr_ood.py using
+--mode residue-ratio --threshold 0.3 --clean strip:
+residue-ratio, threshold 0.3, removing nonstandard amino acids before prediction.
 
 Usage:
     python 09_run_idr_prediction.py
@@ -137,8 +137,8 @@ def main():
         # Ensure boolean
         df["OOD_IDR"] = df["OOD_IDR"].fillna(False).astype(bool)
 
-        # Default=False（极端长度）行直接置 NaN（"未计算"语义，全项目统一惯例，
-        # 流水线位置写入；finalize_ood_columns.py --mode nan 仅作兜底校验）
+        # Write NaN for Default=False extreme-length rows (not computed, project convention).
+        # Apply here in the pipeline; finalize_ood_columns.py --mode nan only validates.
         if "Default" in df.columns:
             nd = ~df["Default"].astype(bool)
             if nd.any():

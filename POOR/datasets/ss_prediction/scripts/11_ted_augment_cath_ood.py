@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""为 ss_prediction test 集追加 OOD_FoldHoldout / OOD_SuperfamilyHoldout（CATH+TED 口径）。
+"""Add CATH+TED OOD_FoldHoldout / OOD_SuperfamilyHoldout to the SSP test set.
 
-链清单 output/ss_ted_aug_chain_list.csv 由本脚本生成（步骤 0）：取
-splits/ssp_{train,val,test}.csv 的 unique_id（PDB_chain，PDB 大写），
-拆为小写 pdb + chain 并附 splits 列（40,066 条，即全库减去划分时剔除的
-4O9X_A）。标注与 holdout 计算均走 .skills/cath-ted-domain-annotation：
-- cath_ted_annotate.py：CATH 优先 + TED 并集补缺、50% 域重叠过滤
-- cath_ted_holdout.py：train-only 对称参考、any 语义、无注释 -> False
-写回时 Default=False（极端长度）行两列置 NaN（ood-annotation-toolkit 惯例，
-不参与计算）。
+Step 0 generates output/ss_ted_aug_chain_list.csv from
+unique_id in splits/ssp_{train,val,test}.csv (uppercase PDB_chain),
+normalizing PDB to lowercase and adding splits. It has 40,066 entries, excluding
+4O9X_A removed during splitting. Annotation and holdouts use .skills/cath-ted-domain-annotation:
+- cath_ted_annotate.py: prioritize CATH, supplement with TED, require 50% domain overlap.
+- cath_ted_holdout.py: symmetric training-only reference, any semantics, unannotated -> False.
+Set both columns to NaN on Default=False extreme-length rows, per toolkit convention;
+these rows are not evaluated.
 """
 import csv
 import subprocess
@@ -28,7 +28,7 @@ TEST_CSV = TASK_DIR / "splits/ssp_test.csv"
 
 
 def build_chain_list():
-    """从 splits 生成链清单（unique_id 为小写 pdb_chain，附 splits 列）。"""
+    """Generate a chain list from splits: lowercase pdb_chain unique_id and splits column."""
     rows = []
     for split in ["train", "val", "test"]:
         with open(TASK_DIR / f"splits/ssp_{split}.csv") as f:
@@ -48,24 +48,24 @@ def build_chain_list():
     print(f"chain list: {CHAIN_LIST} ({len(rows)} chains)")
 
 
-# 0) 链清单生成
+# 0) Generate chain list.
 build_chain_list()
 
-# 1) 链级 CATH+TED 标注（离线，全部命中项目级 TED 缓存）
+# 1) Chain-level CATH+TED annotation offline; all entries hit the project TED cache.
 subprocess.run([sys.executable, str(ANNOTATE), "--chains", str(CHAIN_LIST),
                 "--out", str(LABELS), "--domains-out", str(DOMAINS), "--offline"],
                check=True)
 
-# 2) holdout 重算（skill 统一口径；labels 的划分列为 splits）
+# 2) Canonical holdout recomputation; labels use the splits membership column.
 subprocess.run([sys.executable, str(HOLDOUT), "--labels", str(LABELS),
                 "--split-col", "splits", "--out", str(HOLDOUT_CSV)],
                check=True)
 
-# 3) 写回 ssp_test.csv
+# 3) Write back ssp_test.csv.
 
 
 def uid_key(uid):
-    """test csv 的 unique_id 为大写 PDB（如 7E3T_A），labels 键为小写 pdb_chain"""
+    """Test IDs use uppercase PDB (e.g. 7E3T_A); label keys use lowercase pdb_chain."""
     pdb, chain = uid.rsplit("_", 1)
     return f"{pdb.lower()}_{chain}"
 
@@ -82,7 +82,7 @@ for col in ["OOD_FoldHoldout", "OOD_SuperfamilyHoldout"]:
 n_f = n_s = n_un = 0
 for r in test:
     if r.get("Default") != "True":
-        # 极端长度行不参与计算，置 NaN（空单元格）
+        # Extreme-length rows are not evaluated; write NaN (empty cells).
         r["OOD_FoldHoldout"] = ""
         r["OOD_SuperfamilyHoldout"] = ""
         continue

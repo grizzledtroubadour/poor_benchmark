@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-解压并校验 EnzyBase12k 结构文件
-- 解压 DATASET.zip (pdb/pqr) 与 Dataset_mmcifs.zip (cif)
-- 统计文件数量与格式
-- 将结构文件名与 metadata.csv 中的 uniprot_id / pdb_id_final 进行匹配
-- 输出缺失结构文件的清单
+Extract and validate EnzyBase12k structures.
+- Extract DATASET.zip (pdb/pqr) and Dataset_mmcifs.zip (cif).
+- Count files and formats.
+- Match structure filenames with metadata.csv uniprot_id / pdb_id_final.
+- Write missing-structure lists.
 """
 import os
 import re
@@ -38,7 +38,7 @@ def unzip_file(zip_path, extract_to):
 
 
 def collect_files(directory, extensions):
-    """递归收集指定扩展名的文件"""
+    """Recursively collect files with the requested extensions."""
     files = []
     for ext in extensions:
         files.extend(directory.rglob(f"*{ext}"))
@@ -46,22 +46,22 @@ def collect_files(directory, extensions):
 
 
 def extract_id_from_filename(filename):
-    """从文件名提取 ID（假设为 uniprot_id 或 pdb_id）"""
+    """Extract an ID from a filename, assumed to be uniprot_id or pdb_id."""
     base = filename.stem
-    # 移除常见后缀
+    # Remove common suffixes.
     base = re.sub(r'_(?:AF|pdb|model|ranked)_?\d*$', '', base, flags=re.IGNORECASE)
-    base = re.sub(r'_[A-Za-z]$', '', base)  # 移除链标识
+    base = re.sub(r'_[A-Za-z]$', '', base)  # Remove chain suffix.
     return base.upper()
 
 
 def main():
-    # 1. 加载元数据
+    # 1. Load metadata.
     print(f"[INFO] Loading metadata: {META_PATH}")
     df = pd.read_csv(META_PATH)
     n_meta = len(df)
     print(f"[INFO] Metadata rows: {n_meta}")
 
-    # 2. 解压
+    # 2. Extract archives.
     if not DATASET_EXTRACT_DIR.exists() or not any(DATASET_EXTRACT_DIR.iterdir()):
         if DATASET_ZIP.exists():
             unzip_file(DATASET_ZIP, DATASET_EXTRACT_DIR)
@@ -78,7 +78,7 @@ def main():
     else:
         print(f"[INFO] {MMCIF_EXTRACT_DIR} already exists, skipping unzip.")
 
-    # 3. 收集结构文件
+    # 3. Collect structure files.
     pdb_files = collect_files(DATASET_EXTRACT_DIR, [".pdb"]) if DATASET_EXTRACT_DIR.exists() else []
     pqr_files = collect_files(DATASET_EXTRACT_DIR, [".pqr"]) if DATASET_EXTRACT_DIR.exists() else []
     cif_files = collect_files(MMCIF_EXTRACT_DIR, [".cif"]) if MMCIF_EXTRACT_DIR.exists() else []
@@ -87,7 +87,7 @@ def main():
     print(f"[INFO] Found {len(pqr_files)} .pqr files")
     print(f"[INFO] Found {len(cif_files)} .cif files")
 
-    # 4. 文件名统计
+    # 4. Summarize filenames.
     file_stats = {
         "n_metadata_rows": n_meta,
         "n_pdb_files": len(pdb_files),
@@ -96,12 +96,12 @@ def main():
         "total_structure_files": len(pdb_files) + len(pqr_files) + len(cif_files),
     }
 
-    # 5. 与 metadata 匹配
-    # 构建 metadata ID 集合
+    # 5. Match metadata.
+    # Build metadata ID sets.
     uniprot_set = set(df["uniprot_id"].dropna().astype(str).str.upper())
     pdb_set = set(df["pdb_id_final"].dropna().astype(str).str.upper())
 
-    # 提取文件名 ID
+    # Extract filename IDs.
     pdb_ids = [extract_id_from_filename(f) for f in pdb_files]
     pqr_ids = [extract_id_from_filename(f) for f in pqr_files]
     cif_ids = [extract_id_from_filename(f) for f in cif_files]
@@ -125,8 +125,8 @@ def main():
         "cif_files_unmatched": len(cif_files) - max(cif_uniprot_matched, cif_pdb_matched),
     }
 
-    # 6. 缺失文件分析
-    # 以 uniprot_id 为主键，检查哪些 metadata 行缺少对应的结构文件
+    # 6. Analyze missing files.
+    # Use uniprot_id as the key to identify metadata rows without structures.
     all_structure_ids = set(pdb_ids + pqr_ids + cif_ids)
     missing_uniprots = sorted(uniprot_set - all_structure_ids)
 
@@ -147,12 +147,12 @@ def main():
         "missing_by_structure_source": missing_by_source,
     }
 
-    # 7. 扩展名分布
+    # 7. Extension distribution.
     ext_counter = Counter()
     for f in pdb_files + pqr_files + cif_files:
         ext_counter[f.suffix.lower()] += 1
 
-    # 8. 保存报告
+    # 8. Save the report.
     report = {
         "file_stats": file_stats,
         "match_stats": match_stats,
@@ -165,7 +165,7 @@ def main():
         json.dump(report, f, indent=2)
     print(f"[INFO] Verification report saved to {report_path}")
 
-    # 9. 简要输出
+    # 9. Brief summary.
     print("\n===== Verification Summary =====")
     for k, v in file_stats.items():
         print(f"  {k}: {v}")

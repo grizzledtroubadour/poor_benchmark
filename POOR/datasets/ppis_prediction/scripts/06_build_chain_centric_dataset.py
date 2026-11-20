@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-基于原始 42,112 条 pair 构建 chain-centric 数据集。
+Build a chain-centric dataset from the original 42,112 pairs.
 
-核心思想：
-- 以唯一氨基酸序列作为链的标识。
-- 对每条唯一序列，聚合它在所有 pair 中出现时的界面残基（取并集）。
-- 得到该序列的"全结合位点"标签。
+Core design:
+- Identify each chain by its unique amino-acid sequence.
+- Union interface residues across every occurrence of that sequence in all pairs.
+- This yields all observed binding-site labels for the sequence.
 
-输出：
+Output:
     output/chain_centric_metadata.csv
     output/chain_interface_labels/{seq_hash}_labels.npz
     output/chain_centric_summary.json
@@ -43,7 +43,7 @@ CHAIN_LABEL_DIR = OUTPUT_DIR / "chain_interface_labels"
 
 
 def seq_hash(seq):
-    """基于序列生成稳定哈希。"""
+    """Generate a stable sequence hash."""
     return hashlib.md5(seq.encode("utf-8")).hexdigest()
 
 
@@ -53,7 +53,7 @@ def load_csv(path):
 
 
 def load_interface_labels(unique_id):
-    """加载 pair 的受体/配体界面标签。"""
+    """Load receptor/ligand interface labels for a pair."""
     label_path = INTERFACE_LABEL_DIR / f"{unique_id}_labels.npz"
     if not label_path.exists():
         return None, None
@@ -66,7 +66,7 @@ def load_interface_labels(unique_id):
 
 
 def build_chain_centric_dataset(metadata):
-    """聚合所有链的界面标签。"""
+    """Aggregate interface labels across all chains."""
     # chain_data[seq_hash] = {
     #   'seq': sequence,
     #   'interface_positions': set of 0-based positions,
@@ -96,7 +96,7 @@ def build_chain_centric_dataset(metadata):
             skipped += 1
             continue
 
-        # 受体链
+        # Receptor chain
         if r_seq:
             h = seq_hash(r_seq)
             info = chain_data[h]
@@ -106,7 +106,7 @@ def build_chain_centric_dataset(metadata):
             r_interface = set(np.where(r_labels == 1)[0].tolist())
             info["interface_positions"].update(r_interface)
 
-        # 配体链
+        # Ligand chain
         if l_seq:
             h = seq_hash(l_seq)
             info = chain_data[h]
@@ -124,7 +124,7 @@ def build_chain_centric_dataset(metadata):
 
 
 def save_chain_labels(chain_data):
-    """保存每条唯一序列的聚合标签为 NPZ。"""
+    """Save aggregated labels for each unique sequence as NPZ."""
     CHAIN_LABEL_DIR.mkdir(parents=True, exist_ok=True)
 
     for h, info in chain_data.items():
@@ -137,7 +137,7 @@ def save_chain_labels(chain_data):
 
 
 def save_chain_metadata(chain_data):
-    """保存 chain-centric 元数据表。"""
+    """Save chain-centric metadata."""
     rows = []
     for h, info in chain_data.items():
         seq = info["seq"]
@@ -156,7 +156,7 @@ def save_chain_metadata(chain_data):
             "pdb_ids": ";".join(sorted(set(o["pdb_id"] for o in occurrences)))[:500],
         })
 
-    # 按出现次数降序，再按序列长度排序
+    # Sort by occurrence count descending, then sequence length.
     rows.sort(key=lambda r: (-r["num_occurrences"], -r["length"]))
 
     out_path = OUTPUT_DIR / "chain_centric_metadata.csv"
@@ -175,7 +175,7 @@ def save_chain_metadata(chain_data):
 
 
 def save_summary(chain_data, metadata_rows):
-    """保存统计摘要。"""
+    """Save summary statistics."""
     total_occurrences = sum(len(info["occurrences"]) for info in chain_data.values())
     multi_occurrence = sum(1 for info in chain_data.values() if len(info["occurrences"]) > 1)
     only_receptor = sum(1 for info in chain_data.values() if info["as_receptor"] > 0 and info["as_ligand"] == 0)
@@ -219,7 +219,7 @@ def main():
 
     metadata_rows = save_chain_metadata(chain_data)
 
-    # 修正 summary 中的 total_pairs
+    # Correct total_pairs in the summary.
     summary = {
         "total_pairs": len(metadata),
         "unique_chains": len(chain_data),

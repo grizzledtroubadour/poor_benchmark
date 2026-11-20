@@ -1,31 +1,31 @@
 #!/usr/bin/env python3
-"""UniProt 级代表链筛选（DATA_PROCESS.md 2.2 的重实现，补缺口脚本）。
+"""UniProt-level representative-chain selection (reimplements DATA_PROCESS.md 2.2).
 
-按 UniProt ID 分组，每组仅保留一条最优 PDB chain。候选链按以下优先级逐层比较：
-  1. 提取模式        A 档 > B 档（C 档不回退进入候选池）
-  2. 来源质量        Swiss-Prot > TrEMBL（组内恒同，实际无区分力）
-  3. EC 优先         有 EC > 无 EC
-  4. 实验 GO 丰富度  降序
-  5. GO 丰富度       降序
-  6. 分辨率          升序（缺失排最后）
-  7. R-free          升序（缺失排最后）
-  8. 映射长度        降序
-  9. PDB ID + chain ID 字母序升序（确定性 tiebreak）
+Group by UniProt ID and retain the best PDB chain per group using these priorities:
+  1. Extraction tier: A > B (tier C is not included as a fallback).
+  2. Source quality: Swiss-Prot > TrEMBL (constant within each group, so not discriminative).
+  3. EC availability: annotated > unannotated.
+  4. Number of experimental GO terms: descending.
+  5. Total GO terms: descending.
+  6. Resolution: ascending; missing last.
+  7. R-free: ascending; missing last.
+  8. Mapped length: descending.
+  9. PDB ID + chain ID: ascending lexicographic deterministic tiebreak.
 
-候选池即时构建自以下来源（均为现行产物）：
-  - data/sifts/annotated_chains.csv        初筛链元数据（mapped_length ∈ [60,1000] 且有 EC/GO）
-  - data/sifts/sifts_uniprot_mapping.json  SIFTS 残基段 → A/B 档判定（存在 pdb_beg/pdb_end 均有效的段 → A 档）
-  - data/sifts/sifts_go_annotations.json   GO 证据代码 → 实验 GO 数（ijson 流式，10 种实验证据代码）
-  - output/uniprot_metadata.json           reviewed 状态（Swiss-Prot > TrEMBL）
+Build the candidate pool from current outputs:
+  - data/sifts/annotated_chains.csv: initial metadata (mapped_length in [60,1000] and EC/GO).
+  - data/sifts/sifts_uniprot_mapping.json: SIFTS segments determine tier A/B; valid pdb_beg/pdb_end implies A.
+  - data/sifts/sifts_go_annotations.json: experimental GO counts using ijson and ten evidence codes.
+  - output/uniprot_metadata.json: reviewed status (Swiss-Prot > TrEMBL).
 
-输出：output/representative_chains.csv（供 03_extract_representative_structures.py 使用；
-历史执行为 55,124 条代表链）。
+Output: output/representative_chains.csv, consumed by 03_extract_representative_structures.py;
+the historical run selected 55,124 representative chains.
 
-已知口径偏差（详见 DATA_PROCESS.md 注意事项）：
-  - 历史执行在候选入池前对 B 档链做边界推断 identity ≥ 0.90 过滤（419,370/439,427 通过），
-    其产物 data/intermediate/b_boundary_inference.jsonl 未随仓库迁移。本脚本默认 B 档全量入池；
-    若重做了边界推断，可用 --b-keep-list 传入通过的 chain_key 清单（每行一个或含 chain_key 列的 CSV）
-    以复现历史过滤。
+Known deviation (see DATA_PROCESS.md notes):
+  - Historically, B-tier candidates first passed inferred-boundary identity >=0.90 (419,370/439,427 passed).
+    data/intermediate/b_boundary_inference.jsonl was not migrated. This script includes all B-tier candidates by default.
+    After rerunning inference, supply --b-keep-list with passing chain_keys (one per line or a CSV chain_key column)
+    to reproduce the historical filter.
 """
 
 import argparse
@@ -45,18 +45,18 @@ EXP_EVIDENCE = {'EXP', 'IDA', 'IPI', 'IMP', 'IGI', 'IEP', 'TAS', 'IC', 'HTP', 'H
 
 
 def load_filtered_chains():
-    """初筛：mapped_length ∈ [60, 1000] 且有 EC 或 GO 标注（对应文档 1.5）。"""
+    """Initial filter: mapped_length in [60,1000] and EC or GO annotations (document section 1.5)."""
     df = pd.read_csv(SIFTS_DIR / 'annotated_chains.csv', low_memory=False)
     df = df[(df['has_ec'] | df['has_go']) &
             (df['mapped_length'] >= 60) & (df['mapped_length'] <= 1000)].copy()
-    # 剔除 chain_id / pdb_id 缺失的脏行（无法定位结构，不参与筛选）
+    # Exclude missing chain_id/pdb_id rows, whose structures cannot be located.
     df = df[df['pdb_id'].notna() & df['chain_id'].notna()].copy()
     df['chain_key'] = df['pdb_id'] + '_' + df['chain_id']
     return df
 
 
 def classify_extract_mode(chain_keys):
-    """A 档：SIFTS 段中存在 pdb_beg/pdb_end 均有效者；否则 B 档。"""
+    """Tier A requires a SIFTS segment with valid pdb_beg and pdb_end; otherwise tier B."""
     with open(SIFTS_DIR / 'sifts_uniprot_mapping.json') as f:
         mapping = json.load(f)
     modes = {}
@@ -73,7 +73,7 @@ def classify_extract_mode(chain_keys):
 
 
 def count_go_evidence(chain_keys):
-    """流式解析 SIFTS GO 注释，统计每条链的实验证据 GO 数与 GO 总数。"""
+    """Stream SIFTS GO annotations; count experimental and total GO terms per chain."""
     go_count, exp_go_count = {}, {}
     with open(SIFTS_DIR / 'sifts_go_annotations.json', 'rb') as f:
         for chain_key, record in ijson.kvitems(f, ''):
@@ -93,7 +93,7 @@ def count_go_evidence(chain_keys):
 
 
 def load_b_keep_list(path):
-    """读取 B 档边界推断通过清单（每行一个 chain_key，或含 chain_key 列的 CSV）。"""
+    """Read passing B-tier chain_keys, one per line or from a CSV chain_key column."""
     with open(path) as f:
         first = f.readline().strip()
     if first == 'chain_key' or 'chain_key' in first.split(','):
@@ -105,9 +105,9 @@ def load_b_keep_list(path):
 def main():
     ap = argparse.ArgumentParser(description='UniProt-level representative chain selection')
     ap.add_argument('--out', type=Path, default=OUT_DIR / 'representative_chains.csv',
-                    help='输出 CSV（默认 output/representative_chains.csv）')
+                    help='Output CSV (default: output/representative_chains.csv)')
     ap.add_argument('--b-keep-list', type=Path, default=None,
-                    help='可选：B 档边界推断 identity≥0.90 通过的 chain_key 清单（复现历史过滤）')
+                    help='Optional chain_keys passing B-tier boundary identity >=0.90, to reproduce historical filtering')
     args = ap.parse_args()
 
     print('[1/4] Loading filtered candidate chains...')

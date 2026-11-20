@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
-脚本：02_parse_index.py
-用途：解析 PDBbind v2020.R1（PDBbind+ 免费数据包）索引文件，提取蛋白-配体结合亲和力标签与元数据。
+Script: 02_parse_index.py
+Purpose: Parse the PDBbind v2020.R1 index (free PDBbind+ distribution) to extract protein-ligand affinity labels and metadata.
 
-使用：
+Usage:
     cd binding_affinity/
     python scripts/02_parse_index.py
 
-输入：
+Input:
     data/index/INDEX_general_PL.2020R1.lst
     data/P-L/{year_range}/{pdb_id}/{pdb_id}_protein.pdb
     data/P-L/{year_range}/{pdb_id}/{pdb_id}_ligand.sdf
     data/P-L/{year_range}/{pdb_id}/{pdb_id}_pocket.pdb
 
-输出：
+Output:
     output/pdbbind_v2020_metadata.csv
     output/pdbbind_v2020_metadata_stats.json
 
-索引格式示例（无预计算 pK 列）：
+Example index format (no precomputed pK column):
     2tpi  2.10  1982  Kd=49uM       // 2tpi.pdf (2-mer)
     6rsa   NMR  1986  Ki=40uM       // 6rsa.pdf (UVC)
     4cts  2.90  1984  Kd<10uM       // 4cts.pdf (OAA)
@@ -32,7 +32,7 @@ import argparse
 from pathlib import Path
 from collections import defaultdict, Counter
 
-# 单位转换到 M（摩尔）
+# Convert units to M (molar).
 UNIT_FACTOR = {
     "M": 1.0,
     "mM": 1e-3,
@@ -47,8 +47,8 @@ UNIT_FACTOR = {
     "fm": 1e-15,
 }
 
-# 亲和力字符串解析：支持 Kd/Ki/IC50, =/<|>/~, 数值, 单位
-# 示例：Kd=49uM, Ki=0.43uM, IC50=5nM, Kd<10uM, Kd=741.3+/-53.1uM
+# Affinity string parsing: supports Kd/Ki/IC50, operators, numeric values, and units.
+# Examples: Kd=49uM, Ki=0.43uM, IC50=5nM, Kd<10uM, Kd=741.3+/-53.1uM
 AFFINITY_RE = re.compile(
     r"^(Kd|Ki|IC50)\s*(<=|>=|[=<>~≤≥])\s*([0-9]+\.?[0-9]*)\s*([a-zA-Zμ]+)"
 )
@@ -65,11 +65,11 @@ NOTE_PATTERNS = {
 
 def parse_affinity(token: str):
     """
-    解析亲和力字符串。
-    返回：(aff_type, operator, value_M, pK) 或 None（无法解析）。
+    Parse an affinity string.
+    Return (aff_type, operator, value_M, pK), or None if parsing fails.
     """
     token = token.strip()
-    # 去除 +/- 误差部分，如 741.3+/-53.1uM -> 741.3uM
+    # Remove the +/- uncertainty, e.g. 741.3+/-53.1uM -> 741.3uM.
     token = re.sub(r"\+/-\s*[0-9]+\.?[0-9]*", "", token)
     token = re.sub(r"\s+", "", token)
 
@@ -97,7 +97,7 @@ def parse_affinity(token: str):
 
 
 def parse_resolution(token: str):
-    """解析分辨率；NMR 返回 None。"""
+    """Parse resolution; return None for NMR."""
     token = token.strip()
     if token.upper() == "NMR" or token == "-":
         return None
@@ -108,13 +108,13 @@ def parse_resolution(token: str):
 
 
 def parse_ligand_name(comment: str):
-    """从注释中提取括号内的配体名称。"""
+    """Extract the parenthesized ligand name from comments."""
     m = re.search(r"\(([^()]+)\)", comment)
     return m.group(1).strip() if m else ""
 
 
 def parse_notes(comment: str):
-    """从注释中提取各类标记。"""
+    """Extract flags from comments."""
     notes = {}
     for key, pattern in NOTE_PATTERNS.items():
         m = pattern.search(comment)
@@ -127,14 +127,14 @@ def parse_notes(comment: str):
 
 def parse_index_line(line: str):
     """
-    解析 PDBbind v2020.R1 索引文件的一行。
-    返回 dict 或 None（无法解析/注释行）。
+    Parse one line of the PDBbind v2020.R1 index.
+    Return a dict, or None for parsing failures/comment lines.
     """
     line = line.strip()
     if not line or line.startswith("#"):
         return None
 
-    # 分离数据部分与注释部分
+    # Separate data from comments.
     if "//" in line:
         data_part, comment = line.split("//", 1)
     else:
@@ -176,7 +176,7 @@ def parse_index_line(line: str):
 
 
 def load_index_file(path: Path):
-    """加载索引文件，返回解析后的记录列表。"""
+    """Load the index file and return parsed records."""
     records = []
     errors = []
     with open(path, "r", encoding="utf-8") as f:
@@ -193,14 +193,14 @@ def load_index_file(path: Path):
 
 def locate_structure_files(data_dir: Path, pdb_id: str):
     """
-    在 data/P-L/ 下按 pdb_id 定位结构文件。
-    返回相对路径字典；找不到则返回空字典。
+    Locate structure files by pdb_id under data/P-L/.
+    Return relative paths as a dict, or an empty dict if no files are found.
     """
     pl_dir = data_dir / "P-L"
     if not pl_dir.exists():
         return {}
 
-    # 按年份区间搜索
+    # Search by year range.
     for year_range in pl_dir.iterdir():
         if not year_range.is_dir():
             continue
@@ -221,22 +221,22 @@ def locate_structure_files(data_dir: Path, pdb_id: str):
 
 
 def build_metadata(data_dir: Path, output_dir: Path):
-    """解析 v2020.R1 索引并生成元数据 CSV。"""
+    """Parse the v2020.R1 index and generate the metadata CSV."""
     index_path = data_dir / "index" / "INDEX_general_PL.2020R1.lst"
 
     if not index_path.exists():
-        raise FileNotFoundError(f"索引文件不存在: {index_path}")
+        raise FileNotFoundError(f"Index file does not exist: {index_path}")
 
-    print(f"[加载] {index_path}")
+    print(f"[Loading] {index_path}")
     records, errors = load_index_file(index_path)
-    print(f"[加载] 成功解析: {len(records)} 条，解析失败: {len(errors)} 条")
+    print(f"[Loading] Parsed successfully: {len(records)} records; parsing failures: {len(errors)} records")
 
     if errors:
-        print(f"[警告] 前 5 条解析失败记录:")
+        print(f"[Warning] First five records that failed parsing:")
         for e in errors[:5]:
             print(f"  - {e['raw'].strip()[:100]} | {e['parse_error']}")
 
-    # 去重（按 pdb_id 保留首次出现）
+    # Deduplicate by pdb_id, keeping the first occurrence.
     seen = {}
     deduped = []
     for rec in records:
@@ -245,10 +245,10 @@ def build_metadata(data_dir: Path, output_dir: Path):
             seen[pid] = rec
             deduped.append(rec)
 
-    print(f"[处理] 去重后: {len(deduped)} 条")
+    print(f"[Processing] After deduplication: {len(deduped)} records")
 
-    # 定位结构文件
-    print("[处理] 定位结构文件...")
+    # Locate structure files
+    print("[Processing] Locate structure files...")
     missing_structures = 0
     for rec in deduped:
         struct = locate_structure_files(data_dir, rec["pdb_id"])
@@ -256,7 +256,7 @@ def build_metadata(data_dir: Path, output_dir: Path):
             missing_structures += 1
         rec.update(struct)
 
-    # 输出 CSV
+    # Output CSV
     output_dir.mkdir(parents=True, exist_ok=True)
     out_csv = output_dir / "pdbbind_v2020_metadata.csv"
     fieldnames = [
@@ -289,7 +289,7 @@ def build_metadata(data_dir: Path, output_dir: Path):
         for rec in deduped:
             writer.writerow({k: rec.get(k, "") for k in fieldnames})
 
-    # 统计
+    # Statistics
     stats = {
         "total_records": len(records),
         "parse_errors": len(errors),
@@ -312,13 +312,13 @@ def build_metadata(data_dir: Path, output_dir: Path):
     with open(stats_path, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
 
-    print(f"\n[输出] 元数据 CSV: {out_csv}")
-    print(f"[输出] 统计 JSON: {stats_path}")
-    print(f"[统计] 唯一复合物数: {stats['unique_records']}")
-    print(f"[统计] 亲和力类型分布: {stats['affinity_type_counts']}")
-    print(f"[统计] 操作符分布: {stats['affinity_operator_counts']}")
-    print(f"[统计] 年份范围: {stats['release_year_range']['min']} - {stats['release_year_range']['max']}")
-    print(f"[统计] 缺失结构文件数: {stats['missing_structures']}")
+    print(f"\n[Output] Metadata CSV: {out_csv}")
+    print(f"[Output] Statistics JSON: {stats_path}")
+    print(f"[Statistics] Unique complexes: {stats['unique_records']}")
+    print(f"[Statistics] Affinity type distribution: {stats['affinity_type_counts']}")
+    print(f"[Statistics] Operator distribution: {stats['affinity_operator_counts']}")
+    print(f"[Statistics] Year range: {stats['release_year_range']['min']} - {stats['release_year_range']['max']}")
+    print(f"[Statistics] Missing structure files: {stats['missing_structures']}")
 
 
 def main():

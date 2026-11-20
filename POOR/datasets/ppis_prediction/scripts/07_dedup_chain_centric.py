@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-对 chain-centric 数据集进行 95% identity 序列去冗余。
+Deduplicate chain-centric sequences at 95% identity.
 
-步骤：
-1. 从 chain_centric_metadata.csv 读取 22,223 条唯一链序列。
-2. 用 mmseqs2 cluster 以 95% identity / 80% coverage 聚类。
-3. 每个聚类保留一条代表序列（mmseqs2 自动选择）。
+Steps:
+1. Read 22,223 unique chain sequences from chain_centric_metadata.csv.
+2. Cluster with mmseqs2 at 95% identity and 80% coverage.
+3. Keep one representative chosen by mmseqs2 per cluster.
 
-历史版本（dedup_chain_centric_and_link_structures.py）曾从 Pair-Centric 旧线
-产物（output/structures/，已归档）为代表链创建结构符号链接到
-output/chain_representative_structures/；该环节已被
-08_extract_representative_structures.py（直接从 pair 文件提取坐标写入 pdbs/）
-完全取代，本脚本已裁掉符号链接死代码，结构来源字段
+The historical dedup_chain_centric_and_link_structures.py linked representatives to
+archived pair-centric outputs in output/structures/, writing links under
+output/chain_representative_structures/. This is fully replaced by
+08_extract_representative_structures.py, which extracts pair coordinates directly into pdbs/.
+Obsolete symlink code has been removed. Structure-source fields
 （has_structure / representative_structure / structure_source_*）
-初始化为空，由 08 回填。
+are initialized empty and filled by step 08.
 
-输出：
+Output:
     output/chain_centric_dedup_metadata.csv
     output/chain_centric_dedup_summary.json
 """
@@ -65,7 +65,7 @@ def write_fasta(records, out_path):
 
 
 def run_mmseqs_cluster(fasta_path, tmp_dir, num_workers=32):
-    """运行 mmseqs2 cluster 并返回 tsv 聚类结果路径。"""
+    """Run mmseqs2 cluster and return the cluster TSV path."""
     os.makedirs(tmp_dir, exist_ok=True)
     db = os.path.join(tmp_dir, "seq_db")
     clu = os.path.join(tmp_dir, "clu")
@@ -83,7 +83,7 @@ def run_mmseqs_cluster(fasta_path, tmp_dir, num_workers=32):
 
 
 def parse_cluster_tsv(tsv_path):
-    """解析 mmseqs2 cluster tsv，返回 representative -> [members] 的 dict。"""
+    """Parse cluster TSV into representative -> [members]."""
     clusters = defaultdict(list)
     with open(tsv_path) as f:
         for line in f:
@@ -104,7 +104,7 @@ def main():
     chain_records = load_csv(ROOT / args.chain_metadata)
     logger.info("Loaded %d unique chain records", len(chain_records))
 
-    # 1. 写 FASTA
+    # 1. Write FASTA.
     fasta_path = OUTPUT_DIR / "chain_centric_sequences.fasta"
     write_fasta(chain_records, fasta_path)
     logger.info("Wrote FASTA with %d sequences to %s", len(chain_records), fasta_path)
@@ -115,10 +115,10 @@ def main():
         clusters = parse_cluster_tsv(tsv_path)
     logger.info("Clustering complete: %d clusters", len(clusters))
 
-    # 3. 构建序列哈希 -> 完整记录的映射
+    # 3. Map sequence hashes to complete records.
     hash_to_record = {r["seq_hash"]: r for r in chain_records}
 
-    # 4. 生成去冗余后的元数据（结构来源字段留空，由 08 回填）
+    # 4. Generate deduplicated metadata; step 08 fills structure-source fields.
     rep_rows = []
 
     for rep_hash, members in clusters.items():
@@ -127,7 +127,7 @@ def main():
             logger.warning("Representative hash not found in metadata: %s", rep_hash)
             continue
 
-        # 该代表序列的所有成员记录
+        # All member records for this representative
         member_records = [hash_to_record[m] for m in members if m in hash_to_record]
         total_occurrences = sum(int(r["num_occurrences"]) for r in member_records)
         total_interface = sum(int(r["num_interface_residues"]) for r in member_records)
@@ -149,7 +149,7 @@ def main():
             "structure_source_role": "",
         })
 
-    # 按聚类大小降序排列
+    # Sort by descending cluster size.
     rep_rows.sort(key=lambda r: (-r["cluster_size"], -r["num_occurrences"]))
 
     out_path = OUTPUT_DIR / "chain_centric_dedup_metadata.csv"
@@ -166,7 +166,7 @@ def main():
         writer.writerows(rep_rows)
     logger.info("Saved dedup metadata: %d representative chains to %s", len(rep_rows), out_path)
 
-    # 5. 统计摘要（结构关联统计由 08 提取代表结构后回填，本阶段不含）
+    # 5. Summary statistics; structure linkage counts are added after step 08.
     summary = {
         "original_unique_chains": len(chain_records),
         "representative_chains_after_dedup": len(rep_rows),

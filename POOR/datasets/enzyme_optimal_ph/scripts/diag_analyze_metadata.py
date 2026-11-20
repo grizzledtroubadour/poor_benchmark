@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 EnzyBase12k metadata analyzer
-对 Zenodo 18405148 的 metadata.csv 进行全面分析
+Comprehensive analysis of metadata.csv from Zenodo 18405148.
 """
 import os
 import sys

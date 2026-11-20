@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-批量解析原始 PDB/mmCIF 文件的 deposition date，映射到 chain_key。
+Batch-parse deposition dates from source PDB/mmCIF files and map them to chain_key.
 """
 import gzip
 import json
@@ -14,7 +14,7 @@ PDB_DIR = POOR_ROOT / "data/pdb"
 OUT_JSON = TASK_DIR / "output/deposition_dates.json"
 
 def parse_pdb_date_from_gz(filepath):
-    """从 gzipped PDB 文件的 HEADER 行解析日期。"""
+    """Parse the date from a gzipped PDB HEADER record."""
     month_map = {
         'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
         'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12
@@ -43,7 +43,7 @@ def parse_pdb_date_from_gz(filepath):
 
 
 def parse_cif_date_from_gz(filepath):
-    """从 gzipped mmCIF 文件解析 deposition date。"""
+    """Parse deposition date from a gzipped mmCIF file."""
     with gzip.open(filepath, 'rt') as f:
         for line in f:
             line_stripped = line.strip()
@@ -71,31 +71,31 @@ def main():
         reader = csv.DictReader(f)
         for row in reader:
             chain_keys.append(row['chain_key'])
-    
+
     dates = {}
     failed = []
-    
+
     for chain_key in tqdm(chain_keys, desc="Parsing deposition dates"):
         pdb_id = chain_key.split('_')[0]
-        
+
         # Try PDB first
         pdb_path = PDB_DIR / f"{pdb_id}.pdb.gz"
         cif_path = PDB_DIR / f"{pdb_id}.cif.gz"
-        
+
         date = None
         if pdb_path.exists():
             date = parse_pdb_date_from_gz(pdb_path)
         elif cif_path.exists():
             date = parse_cif_date_from_gz(cif_path)
-        
+
         if date:
             dates[chain_key] = date
         else:
             failed.append(chain_key)
-    
+
     with open(OUT_JSON, 'w') as f:
         json.dump(dates, f, indent=2)
-    
+
     print(f"Parsed: {len(dates)}/{len(chain_keys)}")
     if failed:
         print(f"Failed ({len(failed)}): {failed[:10]}...")

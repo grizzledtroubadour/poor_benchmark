@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-准备标准格式的 splits/ 与 pdbs/
-1. 合并 test.csv 与 ood_extremelength.csv
-2. 为 test 添加 Default / OOD_ExtremeLong / OOD_ExtremeShort 列
-3. 整理结构文件到 pdbs/ 目录，统一使用 .cif 格式（若无则回退 .pdb）
-4. 从结构文件中提取 aa_seq 替换 uniprot_seq_cut
-5. 生成统一 schema 列：unique_id, aa_seq, struct_file, label
-   （历史注记：初版产出为 unique_id, file_type, aa_seq, labels，后经全项目
-   统一 schema 迁移为当前四列；本脚本现已直接产出统一 schema）
+Prepare standardized splits/ and pdbs/.
+1. Merge test.csv and ood_extremelength.csv.
+2. Add Default / OOD_ExtremeLong / OOD_ExtremeShort to test.
+3. Collect structures in pdbs/, preferring .cif and falling back to .pdb.
+4. Replace uniprot_seq_cut with aa_seq extracted from structures.
+5. Write unified schema: unique_id, aa_seq, struct_file, label.
+   Historically, outputs used unique_id, file_type, aa_seq, labels, later migrated
+   project-wide to the current four columns. This script now writes the unified schema directly.
 """
 import argparse
 import os
@@ -48,7 +48,7 @@ def clean_seq(seq):
 
 
 def extract_seq_from_cif_fast(cif_path):
-    """快速从 mmCIF 文件中提取 CA 残基序列"""
+    """Quickly extract CA residue sequences from mmCIF."""
     residues = []
     seen = set()
     try:
@@ -76,7 +76,7 @@ def extract_seq_from_cif_fast(cif_path):
 
 
 def extract_seq_from_pdb_fast(pdb_path):
-    """快速从 PDB 文件中提取 CA 残基序列"""
+    """Quickly extract CA residue sequences from PDB."""
     residues = []
     seen = set()
     try:
@@ -103,7 +103,7 @@ def extract_seq_from_pdb_fast(pdb_path):
 
 
 def find_structure_file(uniprot_id):
-    """优先返回 .cif 文件路径，否则返回 .pdb"""
+    """Prefer the .cif path, otherwise return .pdb."""
     cif_path = CIF_DIR / f"{uniprot_id}.cif"
     pdb_path = PDB_DIR / f"{uniprot_id}.pdb"
     if cif_path.exists():
@@ -114,7 +114,7 @@ def find_structure_file(uniprot_id):
 
 
 def process_one_sample(args):
-    """处理单个样本：复制结构文件并提取序列"""
+    """Process one sample: copy its structure and extract its sequence."""
     row_dict, is_test, pdbs_dir = args
     uniprot_id = row_dict["uniprot_id"]
     struct_path, file_type = find_structure_file(uniprot_id)
@@ -122,7 +122,7 @@ def process_one_sample(args):
     if struct_path is None:
         return None, f"file_not_found:{uniprot_id}"
 
-    # 提取序列
+    # Extract sequence.
     if file_type == "cif":
         struct_seq = extract_seq_from_cif_fast(struct_path)
     else:
@@ -131,7 +131,7 @@ def process_one_sample(args):
     if struct_seq is None or len(clean_seq(struct_seq)) == 0:
         return None, f"seq_extract_failed:{uniprot_id}"
 
-    # 复制结构文件到 pdbs/
+    # Copy structure to pdbs/.
     target_name = f"{uniprot_id}.{file_type}"
     target_path = pdbs_dir / target_name
     if not target_path.exists():
@@ -153,7 +153,7 @@ def process_one_sample(args):
 
 
 def prepare_split_parallel(df, split_name, pdbs_dir, is_test=False, n_workers=16):
-    """并行准备单个划分文件"""
+    """Prepare one split file in parallel."""
     print(f"[INFO] Preparing {split_name} with {n_workers} workers...")
     tasks = [(row.to_dict(), is_test, pdbs_dir) for _, row in df.iterrows()]
 
@@ -177,15 +177,15 @@ def prepare_split_parallel(df, split_name, pdbs_dir, is_test=False, n_workers=16
 
 
 def main():
-    parser = argparse.ArgumentParser(description="准备统一 schema 的 splits/ 与 pdbs/")
+    parser = argparse.ArgumentParser(description="Prepare unified-schema splits/ and pdbs/")
     parser.add_argument("--input-dir", type=Path, default=SPLITS_DIR,
-                        help="02 初分产物（train/val/test/ood_extremelength.csv）所在目录")
+                        help="Directory containing initial step-02 splits (train/val/test/ood_extremelength.csv)")
     parser.add_argument("--splits-dir", type=Path, default=SPLITS_DIR,
-                        help="最终 splits 输出目录")
+                        help="Final split output directory")
     parser.add_argument("--pdbs-dir", type=Path, default=PDBS_DIR,
-                        help="结构文件输出目录")
+                        help="Structure output directory")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR,
-                        help="split_mapping.json 输出目录")
+                        help="split_mapping.json output directory")
     args = parser.parse_args()
 
     input_dir = args.input_dir
@@ -208,7 +208,7 @@ def main():
 
     print(f"[INFO] Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}, Extreme: {len(extreme_df)}")
 
-    # 1. 合并 test 与 extreme
+    # 1. Merge test and extreme samples.
     test_df["Default"] = True
     test_df["OOD_ExtremeLong"] = False
     test_df["OOD_ExtremeShort"] = False
@@ -221,7 +221,7 @@ def main():
     print(f"[INFO] Combined test: {len(combined_test)}")
     print(f"[INFO] Default: {combined_test['Default'].sum()}, ExtremeLong: {combined_test['OOD_ExtremeLong'].sum()}, ExtremeShort: {combined_test['OOD_ExtremeShort'].sum()}")
 
-    # 2. 并行准备 train / val / test
+    # 2. Prepare train/val/test in parallel.
     train_out = prepare_split_parallel(train_df, "train", pdbs_dir, is_test=False)
     val_out = prepare_split_parallel(val_df, "val", pdbs_dir, is_test=False)
     test_out = prepare_split_parallel(combined_test, "test", pdbs_dir, is_test=True)
@@ -230,12 +230,12 @@ def main():
     print(f"[INFO] Val prepared: {len(val_out)}")
     print(f"[INFO] Test prepared: {len(test_out)}")
 
-    # 3. 保存为最终标准文件名
+    # 3. Save with final standardized filenames.
     train_out.to_csv(splits_dir / "optimal_ph_prediction_train.csv", index=False)
     val_out.to_csv(splits_dir / "optimal_ph_prediction_val.csv", index=False)
     test_out.to_csv(splits_dir / "optimal_ph_prediction_test.csv", index=False)
 
-    # 仅在正常流水线运行（输入即默认 splits/ 目录）时删除初分中间文件
+    # Remove initial intermediate splits only in normal runs whose input is the default splits/ directory.
     if input_dir.resolve() == SPLITS_DIR.resolve():
         extreme_in.unlink()
         train_in.unlink()
@@ -245,7 +245,7 @@ def main():
     print(f"[INFO] Saved final splits to {splits_dir}")
     print(f"[INFO] Copied {len(list(pdbs_dir.glob('*')))} structure files to {pdbs_dir}")
 
-    # 4. 保存元数据映射
+    # 4. Save the metadata mapping.
     mapping = {
         "n_train": len(train_out),
         "n_val": len(val_out),

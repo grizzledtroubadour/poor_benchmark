@@ -202,7 +202,7 @@ for c in dep_cols:
     test.loc[es_el, c] = False
 
 # --------------------------------------------------------------- Default
-# extra test set：无"划分前预挑出"样本，按 Default 本意整表 True（2026-08-27 改判）
+# Extra test set: no preselected samples; set Default=True throughout (changed 2026-08-27).
 test["Default"] = True
 
 # ------------------------------------------------------------------ write

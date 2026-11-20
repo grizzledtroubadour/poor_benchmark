@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""为 func_prediction 四个子任务（ec/go_bp/go_cc/go_mf）test 集追加
-OOD_FoldHoldout / OOD_SuperfamilyHoldout（CATH+TED 口径）。
+"""Add test-set holdout flags to four func_prediction tasks (ec/go_bp/go_cc/go_mf):
+OOD_FoldHoldout / OOD_SuperfamilyHoldout using CATH+TED.
 
-流程（每个子任务，train/val/test 对称增强、独立 train-only 参考集）：
-  1. build_chain_list：从 splits/{sub}_{train,val,test}.csv 生成链清单
-     output/func_{sub}_ted_aug_chain_list.csv（unique_id 大写 PDB 转小写键）
-  2. 调 .skills/cath-ted-domain-annotation/scripts/cath_ted_annotate.py 生成链级标注
-  3. 调同 skill 的 cath_ted_holdout.py 做 holdout 判定（train-only 参考集、any 语义、无注释 -> False）
-  4. 本脚本只负责把判定结果写回 splits
+For each task, augment train/val/test symmetrically and use its own training-only reference:
+  1. build_chain_list: generate a chain list from splits/{sub}_{train,val,test}.csv.
+     Write output/func_{sub}_ted_aug_chain_list.csv, lowercasing PDB IDs in unique_id.
+  2. Call .skills/cath-ted-domain-annotation/scripts/cath_ted_annotate.py for chain labels.
+  3. Call cath_ted_holdout.py (training-only reference, any semantics, unannotated -> False).
+  4. Write the resulting flags back to splits.
 
-Default=False（极端长度）行此处直接写 NaN（空单元格，"未计算"语义，
-全项目统一惯例）；finalize_ood_columns.py --mode nan 仅作兜底校验
-（见 DATA_PROCESS.md 阶段 4.1）。
+Default=False extreme-length rows receive empty cells (NaN: not computed), following
+project convention. finalize_ood_columns.py --mode nan is only a fallback check
+(see DATA_PROCESS.md Stage 4.1).
 """
 import subprocess
 import sys
@@ -29,15 +29,15 @@ SUBS = ["ec", "go_bp", "go_cc", "go_mf"]
 
 
 def uid_key(uid):
-    """test csv 的 unique_id 为大写 PDB（如 8OZ1_A），labels 键为小写 pdb_chain"""
+    """Test unique_id uses uppercase PDB (e.g. 8OZ1_A); label keys use lowercase pdb_chain."""
     pdb, chain = uid.rsplit("_", 1)
     return f"{pdb.lower()}_{chain}"
 
 
 def build_chain_list(sub, out_path):
-    """从 splits 生成 CATH+TED 标注链清单（补缺口：原为历史一次性生成、脚本已删除）。
+    """Generate CATH+TED chain lists from splits, replacing a deleted historical one-off script.
 
-    输出列：unique_id（小写 pdb_chain 键）、pdb、chain、splits（train/val/test）。
+    Columns: unique_id (lowercase pdb_chain), pdb, chain, splits (train/val/test).
     """
     rows = []
     for split in ["train", "val", "test"]:
@@ -66,7 +66,7 @@ for sub in SUBS:
                     "--out", str(labels_f), "--domains-out", str(domains_f),
                     "--offline"], check=True)
 
-    # holdout 判定由 skill 脚本统一实现（train-only 参考集、any 语义、无注释 -> False）
+    # Use the canonical skill holdout script: training-only reference, any semantics, unannotated -> False.
     subprocess.run([sys.executable, str(HOLDOUT), "--labels", str(labels_f),
                     "--split-col", "splits", "--out", str(flagged_f)], check=True)
 
@@ -81,7 +81,7 @@ for sub in SUBS:
     n_f = n_s = n_un = n_miss = 0
     for i, r in test.iterrows():
         if r.get("Default") != "True":
-            # 极端长度行不参与本维度计算，直接写 NaN（空）
+            # Extreme-length rows are not evaluated on this dimension: write empty/NaN.
             test.at[i, "OOD_FoldHoldout"] = ""
             test.at[i, "OOD_SuperfamilyHoldout"] = ""
             continue

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""为 ligand_binding_affinity 测试集追加值域分 bin 的 LongTail OOD 列。
+"""Add affinity-bin long-tail OOD columns to the ligand_binding_affinity test set.
 
-口径（对齐 optimal_ph 的 OOD_LongTail_pHbin_*）：
-- label = -log10(K)（pK 型亲和力），范围约 0.4–15.2；bin 宽 0.5，边 [-0.5, 16.5)
-- 统计 **train** 各 bin 频次
-- test Default=True 行：所属 bin 的 train 计数 <= 阈值（50 / 100）→ True
-- 本任务 test 全部 Default=True；label 缺失/无法分箱行 → False
+Definition (aligned with optimal_ph OOD_LongTail_pHbin_*):
+- label = -log10(K), approximately 0.4–15.2; bin width 0.5, edges [-0.5, 16.5).
+- Count training samples in each bin.
+- For Default=True test rows, flag True when the training bin count <=50 / <=100.
+- All test rows have Default=True; missing/unbinnable labels receive False.
 """
 import json
 from pathlib import Path
